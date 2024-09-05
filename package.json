@@ -1,0 +1,18 @@
+{
+  "name": "net.emullen.networking",
+  "version": "1.0.0",
+  "displayName": "EMullen Networking",
+  "description": "FISHNET V4.4.2 Required. A layer on top of FishNet to better harness its features and integrate with other packages.",
+  "unity": "2021.3",
+  "unityRelease": "17f1",
+  "documentationUrl": "",
+  "changelogUrl": "",
+  "licensesUrl": "",
+  "dependencies": {},
+  "keywords": [],
+  "author": {
+    "name": "Ethan Mullen",
+    "email": "mullen.ethan@yahoo.com",
+    "url": "https://www.emullen.net"
+  }
+}
