@@ -3,7 +3,8 @@
     "rootNamespace": "EMullen.Networking",
     "references": [
         "FishNet.Runtime",
-        "Unity.TextMeshPro"
+        "Unity.TextMeshPro",
+        "Core"
     ],
     "optionalUnityReferences": [],
     "includePlatforms": [],

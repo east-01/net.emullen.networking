@@ -8,6 +8,7 @@ using FishNet.Managing.Scened;
 using FishNet.Object.Synchronizing;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using EMullen.Core;
 
 namespace EMullen.Networking {
     /// <summary>
