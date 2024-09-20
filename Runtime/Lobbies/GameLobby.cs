@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using FishNet;
 using FishNet.Connection;
-using FishNet.Demo.AdditiveScenes;
 using FishNet.Managing.Scened;
 using FishNet.Object.Synchronizing;
 using UnityEngine;
@@ -203,17 +202,17 @@ namespace EMullen.Networking {
         ///   local splitscreen players connecting to a multiplayer lobby.
         /// </summary>
         /// <param name="conn">The connection that is going to be added to this lobby.</param>
-        /// <param name="players">The list of player's data that will be added to the lobby.</param>
+        /// <param name="playerUIDs">The list of player's data that will be added to the lobby.</param>
         /// <returns>Success status</returns>
-        public bool AddPlayers(NetworkConnection conn, List<PlayerData> players) {
-            foreach(PlayerData pd in players) {
-                if(!AddPlayer(conn, pd))
+        public bool AddPlayers(NetworkConnection conn, List<string> playerUIDs) {
+            foreach(string uid in playerUIDs) {
+                if(!AddPlayer(conn, uid))
                     return false;
             }
             return true;
         }
 
-        public void RemovePlayer(PlayerData data) 
+        public void RemovePlayer(string playerUID) 
         {
             if(!players.Contains(data)) {
                 Debug.LogError($"Can't remove playerdata \"{data}\" from lobby \"{ID}\", they're not in it.");

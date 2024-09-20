@@ -6,6 +6,9 @@ using FishNet.Object.Synchronizing;
 using UnityEngine;
 using System.Linq;
 using FishNet.Transporting;
+using EMullen.SceneMgmt;
+using EMullen.Core;
+using EMullen.PlayerMgmt;
 
 namespace EMullen.Networking {
     /// <summary>
@@ -20,6 +23,18 @@ namespace EMullen.Networking {
     /// </summary>
     public class LobbyManager : NetworkBehaviour
     {
+
+        public static LobbyManager Instance { get; private set; }
+
+        public readonly List<string> lobbyNames = new() { "Champ", "Craig", "Jeremiah", "Gabrial", "Sun", "Time", "Anchor", "Age" };
+
+        [SerializeField]
+        private string defaultSceneName;
+        [SerializeField]
+        private string lobbySceneName;
+
+        [SerializeField]
+        private BLogChannel logSettings;
 
 #region Server side fields
         /// <summary>
@@ -37,13 +52,21 @@ namespace EMullen.Networking {
         /// </summary>
         // [SyncObject]
         // private readonly SyncDictionary<NetworkConnection, string> connectionLobbyPair = new();
-        private readonly SyncVar<Dictionary<NetworkConnection, string>> connectionLobbyPair = new();
+        private readonly SyncDictionary<NetworkConnection, string> connectionLobbyPair = new();
         public int LobbyCount => lobbies.Count;
 #endregion
 
 #region Initializers
         private void Awake() 
         {
+            if(Instance != null) {
+                Debug.LogWarning($"New LobbyCommunicator woke up while one already exists. Destroying gameObject \"{gameObject.name}\"");
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+            
             if(GameLobby.PLAYER_WAIT_TIME <= 0)
                 Debug.LogWarning("GameLobby's PLAYER_WAIT_TIME is <= 0, this is not recommended.");
         }
@@ -64,7 +87,7 @@ namespace EMullen.Networking {
         {
             base.OnStartClient();
 
-            AddToLobby(LocalConnection, PlayerObjectManager.Instance.Players);
+            AddToLobby(LocalConnection, PlayerManager.Instance.LocalPlayers.Select(lp => lp.UID).ToList());
         }
 
         public override void OnStopClient()
@@ -74,9 +97,9 @@ namespace EMullen.Networking {
             // Client side view of the client disconnecting from the server unexpectedly. This forces
             //   the client to perform disconnected actions.
             // The "server side view" is in LobbyManager#ServerManager_OnRemoteConnectionState
-            if(CoreManager.LobbyCommunicator.InLobby) {
-                CoreManager.LobbyCommunicator.StopCommunication("Lost connection with server.", true);
-                SceneController.Instance.LoadScene(new(SceneNames.MENU_TITLE), false);
+            if(LobbyCommunicator.Instance.InLobby) {
+                LobbyCommunicator.Instance.StopCommunication("Lost connection with server.", true);
+                SceneController.Instance.LoadScene(new(defaultSceneName), false);
             }
         }
 #endregion
@@ -99,7 +122,7 @@ namespace EMullen.Networking {
         {
             GameLobby newLobby = new(this, GenerateLobbyID());
             lobbies.Add(newLobby.ID, newLobby);
-            BLog.Log($"Created lobby \"{newLobby.ID}\"", LogChannel.LobbyManager, 0);
+            BLog.Log($"Created lobby \"{newLobby.ID}\"", logSettings, 0);
             return newLobby;
         }
 
@@ -117,7 +140,7 @@ namespace EMullen.Networking {
             }
             lobbies.Remove(lobbyID);
             lobby.Delete();
-            BLog.Log($"Lobby \"{lobbyID}\" deleted.", LogChannel.LobbyManager, 0);
+            BLog.Log($"Lobby \"{lobbyID}\" deleted.", logSettings, 0);
         }
 
 #region Client add/remove
@@ -126,11 +149,11 @@ namespace EMullen.Networking {
         ///   told to retry.
         /// </summary>
         /// <param name="client">The new client to be added to the lobby</param>
-        /// <param name="players">The players connecting with the client</param>
-        public void AddToLobby(NetworkConnection client, List<PlayerData> players) 
+        /// <param name="playerUIDs">The players connecting with the client</param>
+        public void AddToLobby(NetworkConnection client, List<string> playerUIDs) 
         {
-            if(!base.IsServer) {
-                ServerRpcAddToLobby(client, players);
+            if(!IsServerInitialized) {
+                ServerRpcAddToLobby(client, playerUIDs);
                 return;
             }
 
@@ -146,29 +169,29 @@ namespace EMullen.Networking {
                 return;
             }
 
-            BLog.Log($"Searching for a lobby for client {client}:", LogChannel.LobbyManager, 2);
-            GameLobby lobbyToJoin = GetBestFitLobby(client, players);        
+            BLog.Log($"Searching for a lobby for client {client}:", logSettings, 2);
+            GameLobby lobbyToJoin = GetBestFitLobby(client, playerUIDs);        
 
             connectionLobbyPair.Add(client, lobbyToJoin.ID);
 
-            if(!lobbyToJoin.AddPlayers(client, players)) {
+            if(!lobbyToJoin.AddPlayers(client, playerUIDs)) {
                 AbortJoin("Failed to join lobby.");
                 return;
             }
 
-            if(IsServer && !IsHost)
+            if(IsServerInitialized && !IsHostStarted)
                 TargetRpcAddedToLobby(client, lobbyToJoin.ID, lobbyToJoin.Data);
-            else if(IsHost)
-                CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyJoinedEvent(lobbyToJoin.ID, lobbyToJoin.Data);
+            else if(IsHostStarted)
+                LobbyCommunicator.Instance.DoNotUse_InvokeLobbyJoinedEvent(lobbyToJoin.ID, lobbyToJoin.Data);
 
             UpdateLobby(lobbyToJoin.ID, LobbyUpdateReason.PLAYER_JOIN);
-            BLog.Log($"Added client {client} to lobby \"{lobbyToJoin.ID}\"", LogChannel.LobbyManager, 0);
+            BLog.Log($"Added client {client} to lobby \"{lobbyToJoin.ID}\"", logSettings, 0);
         }
         [ServerRpc(RequireOwnership = false)]
-        public void ServerRpcAddToLobby(NetworkConnection newClient, List<PlayerData> players) => AddToLobby(newClient, players);
+        public void ServerRpcAddToLobby(NetworkConnection newClient, List<string> playerUIDs) => AddToLobby(newClient, playerUIDs);
         /// <summary> Used to issue LobbyJoinedEvent to the client's LobbyCommunicator. </summary>
         [TargetRpc]
-        public void TargetRpcAddedToLobby(NetworkConnection client, string lobbyID, LobbyData initialData) => CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyJoinedEvent(lobbyID, initialData);
+        public void TargetRpcAddedToLobby(NetworkConnection client, string lobbyID, LobbyData initialData) => LobbyCommunicator.Instance.DoNotUse_InvokeLobbyJoinedEvent(lobbyID, initialData);
 
         /// <summary>
         /// Remove a client from a lobby with the option to provide a reason.
@@ -178,7 +201,7 @@ namespace EMullen.Networking {
         public void RemoveFromLobby(NetworkConnection client, string reason = "") 
         {
             BLog.Highlight("RemoveFromLobbyCalled");
-            if(!base.IsServer) {
+            if(!IsServerInitialized) {
                 ServerRpcRemoveFromLobby(client);
                 return;
             }
@@ -195,16 +218,16 @@ namespace EMullen.Networking {
 
             connectionLobbyPair.Remove(client);
             
-            if(IsServer && !IsHost) {
+            if(IsServerInitialized && !IsHostStarted) {
                 TargetRpcRemovedFromLobby(client, lobbyToLeave.ID, reason);
                 BLog.Highlight("called target removed from lobby");
-            } else if(IsHost)
-                CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyLeftEvent(lobbyToLeave.ID, reason);
+            } else if(IsHostStarted)
+                LobbyCommunicator.Instance.DoNotUse_InvokeLobbyLeftEvent(lobbyToLeave.ID, reason);
 
             if(!yieldsEmptyLobby)
                 UpdateLobby(lobbyToLeave.ID, LobbyUpdateReason.PLAYER_LEAVE);
 
-            BLog.Log($"Removed client {client} from lobby \"{lobbyToLeave.ID}\" for reason \"{reason}\"", LogChannel.LobbyManager, 0);
+            BLog.Log($"Removed client {client} from lobby \"{lobbyToLeave.ID}\" for reason \"{reason}\"", logSettings, 0);
 
             if(lobbyToLeave.PlayerCount == 0) {
                 DeleteLobby(lobbyToLeave.ID);
@@ -214,7 +237,7 @@ namespace EMullen.Networking {
         public void ServerRpcRemoveFromLobby(NetworkConnection client, string reason = "") { RemoveFromLobby(client, reason); }
         /// <summary> Used to issue LobbyLeftEvent to the client's LobbyCommunicator. </summary>
         [TargetRpc]
-        public void TargetRpcRemovedFromLobby(NetworkConnection client, string lobbyID, string reason) => CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyLeftEvent(lobbyID, reason); 
+        public void TargetRpcRemovedFromLobby(NetworkConnection client, string lobbyID, string reason) => LobbyCommunicator.Instance.DoNotUse_InvokeLobbyLeftEvent(lobbyID, reason); 
 #endregion
 
 #region Events
@@ -249,7 +272,7 @@ namespace EMullen.Networking {
             LobbyData lobbyData = lobby.Data;
 
             // Invoke event on server
-            CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyUpdatedEvent(lobbyID, lobbyData, reason);
+            LobbyCommunicator.Instance.DoNotUse_InvokeLobbyUpdatedEvent(lobbyID, lobbyData, reason);
 
             // Invoke event for clients to said lobby
             foreach(NetworkConnection client in lobby.Connections) {
@@ -260,7 +283,7 @@ namespace EMullen.Networking {
         }
 
         [TargetRpc]
-        public void TargetRpcLobbyUpdatedEvent(NetworkConnection conn, string lobbyID, LobbyData lobbyData, LobbyUpdateReason reason) => CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyUpdatedEvent(lobbyID, lobbyData, reason);
+        public void TargetRpcLobbyUpdatedEvent(NetworkConnection conn, string lobbyID, LobbyData lobbyData, LobbyUpdateReason reason) => LobbyCommunicator.Instance.DoNotUse_InvokeLobbyUpdatedEvent(lobbyID, lobbyData, reason);
 #endregion
 
 #region Lobby Messages
@@ -275,7 +298,7 @@ namespace EMullen.Networking {
         ///                            the message will only go to those connections.</param>
         public void SendLobbyMessage(string lobbyID, LobbyMessageType type, string message, NetworkConnection sender = null, List<NetworkConnection> recipients = null, bool sendOnlyToServer = false) 
         {
-            if(!base.IsServer) {
+            if(!IsServerInitialized) {
                 ServerRpcSendLobbyMessage(lobbyID, base.LocalConnection, type, message, recipients);
                 return;
             }
@@ -283,7 +306,7 @@ namespace EMullen.Networking {
             BLog.Highlight("Sending message " + message);
 
             // Issue message to server
-            CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyMessageEvent(lobbyID, sender, type, message);
+            LobbyCommunicator.Instance.DoNotUse_InvokeLobbyMessageEvent(lobbyID, sender, type, message);
 
             // Issue message to recipients
             if(!sendOnlyToServer) {
@@ -305,11 +328,11 @@ namespace EMullen.Networking {
         }
 
         [TargetRpc]
-        public void TargetRpcRecievedLobbyMessage(NetworkConnection client, string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) => CoreManager.LobbyCommunicator.DoNotUse_InvokeLobbyMessageEvent(lobbyID, sender, type, message);
+        public void TargetRpcRecievedLobbyMessage(NetworkConnection client, string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) => LobbyCommunicator.Instance.DoNotUse_InvokeLobbyMessageEvent(lobbyID, sender, type, message);
 #endregion
 
 #region Matchmaking
-        public GameLobby GetBestFitLobby(NetworkConnection client, List<PlayerData> players) 
+        public GameLobby GetBestFitLobby(NetworkConnection client, List<string> players) 
         {
             List<string> lobbiesToJoin = GetProspectiveLobbies(client, players);
             // TODO: Select from prospective lobbies by certain conditions? Like ping or region?
@@ -317,14 +340,14 @@ namespace EMullen.Networking {
         }
 
         // TODO: Better lobby search algorithm, maybe make an HTTPS request to the server for matchmaking
-        public List<string> GetProspectiveLobbies(NetworkConnection client, List<PlayerData> players) 
+        public List<string> GetProspectiveLobbies(NetworkConnection client, List<string> players) 
         {
             GameLobby lobbyToJoin = null;
             foreach(string id in lobbies.Keys) {
                 GameLobby lobby = lobbies[id];
                 // TODO: Add other determining factors like game state
                 bool joinable = lobby.OpenSlots > 0/* && lobby.State == LobbyState.WAITING_FOR_PLAYERS*/;
-                BLog.Log($"  Found \"{id}\" with {lobby.OpenSlots} open slots in state {lobby.State}. Joinable: {joinable}", LogChannel.LobbyManager, 2);
+                BLog.Log($"  Found \"{id}\" with {lobby.OpenSlots} open slots in state {lobby.State}. Joinable: {joinable}", logSettings, 2);
                 if(joinable) {
                     lobbyToJoin = lobby;
                     break;
@@ -341,8 +364,8 @@ namespace EMullen.Networking {
         [Server]
         private string GenerateLobbyID() 
         {
-            for(int attempt = 0; attempt < KartsIRManager.rlBotNames.Length; attempt++) {
-                string selection = KartsIRManager.rlBotNames[UnityEngine.Random.Range(0, KartsIRManager.rlBotNames.Length)];
+            for(int attempt = 0; attempt < lobbyNames.Count; attempt++) {
+                string selection = lobbyNames[UnityEngine.Random.Range(0, lobbyNames.Count)];
                 if(GetLobby(selection) == null)
                     return selection;
             }
@@ -364,13 +387,13 @@ namespace EMullen.Networking {
             if(type == LobbyMessageType.ACTION) {
                 switch(message) {
                     case LME_CMD_REQUEST_FORCE_MAP_PICK:
-                        if(!base.IsServer)
+                        if(!IsServerInitialized)
                             return;
 
-                        if(!DevSettings.IsDevelopment()) {
-                            Debug.LogWarning("Can't force map pick. We're not in a development build.");
-                            return;
-                        }
+                        // if(!DevSettings.IsDevelopment()) {
+                        //     Debug.LogWarning("Can't force map pick. We're not in a development build.");
+                        //     return;
+                        // }
                         GameLobby lobby = GetLobby(sender);
                         if(lobby == null) {
                             Debug.LogError("Can't force map pick, client is not in a lobby.");
@@ -381,7 +404,7 @@ namespace EMullen.Networking {
                         lobby.forceMapPick = true;
                         break;
                     case LME_CMD_REQUEST_LOBBY_MOVE:
-                        if(!base.IsServer)
+                        if(!IsServerInitialized)
                             return;
 
                         if(sender == null) {
@@ -394,11 +417,11 @@ namespace EMullen.Networking {
                             Debug.LogError("Can't move client to lobby, they are not in one.");
                             return;
                         }
-                        BLog.Log($"Client \"{sender}\" requested to move to lobby", LogChannel.LobbyManager, 0);
-                        if(base.IsHost)
-                            SceneController.Instance.LoadScene(new(SceneNames.MENU_LOBBY), false);
+                        BLog.Log($"Client \"{sender}\" requested to move to lobby", logSettings, 0);
+                        if(IsHostStarted)
+                            SceneController.Instance.LoadScene(new(lobbySceneName), false);
                         else
-                            NetSceneController.Instance.TargetRpcLoadScene(sender, new(SceneNames.MENU_LOBBY), false);
+                            NetSceneController.Instance.TargetRpcLoadScene(sender, new(lobbySceneName), false);
 
                         break;
                 }

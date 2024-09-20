@@ -4,7 +4,9 @@
     "references": [
         "FishNet.Runtime",
         "Unity.TextMeshPro",
-        "Core"
+        "Core",
+        "SceneMgmt",
+        "PlayerMgmt"
     ],
     "optionalUnityReferences": [],
     "includePlatforms": [],

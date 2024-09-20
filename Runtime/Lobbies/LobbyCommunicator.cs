@@ -1,12 +1,10 @@
-using System;
 using System.Collections;
-using System.Collections.Generic;
 using FishNet;
 using FishNet.Connection;
-using FishNet.Object;
 using FishNet.Transporting;
-using Steamworks;
 using UnityEngine;
+using EMullen.Core;
+using System;
 
 namespace EMullen.Networking {
     /// <summary>
@@ -19,10 +17,31 @@ namespace EMullen.Networking {
     public class LobbyCommunicator : MonoBehaviour
     {
 
+        public static LobbyCommunicator Instance { get; private set;}
+
+        [SerializeField]
+        private BLogChannel logSettings;
+
         private bool retryUntilConnected = false;
 
         public string LobbyID { get; private set; }
         public LobbyData? LobbyData { get; private set; }
+
+        public bool IsLocal = false;
+
+        public Action ConfigureNetwork = () => {
+            // if(DevSettings.IsDevelopment() || CoreManager.IsLocal)
+            //     CoreManager.NetworkStateManager.UseLocalTransport();
+            // else
+            //     CoreManager.NetworkStateManager.UseGlobalTransport();
+        };
+
+        public Action StartNetwork = () => {
+            // if(CoreManager.IsLocal)
+            //     CoreManager.NetworkStateManager.StartHost();
+            // else
+            //     CoreManager.NetworkStateManager.StartClient();
+        };
 
 #region Events
         /// <summary>
@@ -65,6 +84,18 @@ namespace EMullen.Networking {
         public event CommunicationEndedHandler CommunicationEndedEvent;
 #endregion
 
+        private void Awake() 
+        {
+            if(Instance != null) {
+                Debug.LogWarning($"New LobbyCommunicator woke up while one already exists. Destroying gameObject \"{gameObject.name}\"");
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+            DontDestroyOnLoad(this); 
+        }
+
         private void OnEnable() 
         { 
             LobbyJoinedEvent += LobbyCommunicator_LobbyJoinedEvent;
@@ -88,26 +119,18 @@ namespace EMullen.Networking {
         }
 
 #region Start/Stop communication
+
         public void StartCommunication(bool retryUntilConnected = true) 
         {
             this.retryUntilConnected = retryUntilConnected;
 
-            BLog.Log("Starting communication.", LogChannel.LobbyCommunicator);
+            BLog.Log("Starting communication.", logSettings);
 
             LobbyID = null;
             LobbyData = null;
 
             // Transport configurement and server starting
-            if(DevSettings.IsDevelopment() || CoreManager.IsLocal)
-                CoreManager.NetworkStateManager.UseLocalTransport();
-            else
-                CoreManager.NetworkStateManager.UseGlobalTransport();
-
-
-            if(CoreManager.IsLocal)
-                CoreManager.NetworkStateManager.StartHost();
-            else
-                CoreManager.NetworkStateManager.StartClient();
+            ConfigureNetwork.Invoke();
         }
 
         public void StartCommunicationDelayed(bool retryUntilConnected = true, float delay = 0.1f) => StartCoroutine(StartCommunicationDelayedCoroutine(retryUntilConnected, delay));
@@ -134,18 +157,14 @@ namespace EMullen.Networking {
             BLog.Highlight($"Communication ended for reason \"{reason}\" lobby id: \"{LobbyID}\"");
             // First pass
             if(LobbyID != null) {
-                NetSceneController.LobbyManager.RemoveFromLobby(CoreManager.LocalConnection, reason);
+                LobbyManager.Instance.RemoveFromLobby(LobbyManager.Instance.LocalConnection, reason);
                 if(!forceStop)
                     return;
             }
 
-            // Second pass
-            if(CoreManager.IsLocal)
-                CoreManager.NetworkStateManager.StopHost();
-            else
-                CoreManager.NetworkStateManager.StopClient();
+            NetworkController.Instance.StopNetwork();
 
-            BLog.Log($"Left lobby \"{LobbyID}\"", LogChannel.LobbyCommunicator, 0);
+            BLog.Log($"Left lobby \"{LobbyID}\"", logSettings, 0);
             
             LobbyID = null;
             LobbyData = null;                
@@ -166,7 +185,7 @@ namespace EMullen.Networking {
 
             LobbyID = lobbyID;
             LobbyData = initialData;
-            BLog.Log($"Joined lobby \"{lobbyID}\"", LogChannel.LobbyCommunicator, 0);
+            BLog.Log($"Joined lobby \"{lobbyID}\"", logSettings, 0);
         }
 
         private void LobbyCommunicator_LobbyLeftEvent(string lobbyID, string reason) 
@@ -201,7 +220,7 @@ namespace EMullen.Networking {
 
         private void ClientManager_OnClientRemoteConnectionState(RemoteConnectionStateArgs args) 
         {
-            if(!InstanceFinder.IsServerOnly && args.ConnectionState == RemoteConnectionState.Stopped) {
+            if(!InstanceFinder.IsServerOnlyStarted && args.ConnectionState == RemoteConnectionState.Stopped) {
                 StopCommunication("Client stopped.");
             }
         }
