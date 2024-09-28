@@ -1,6 +1,9 @@
 using System;
+using EMullen.PlayerMgmt;
+using FishNet;
 using FishNet.Connection;
 using FishNet.Managing;
+using FishNet.Managing.Server;
 using FishNet.Managing.Transporting;
 using FishNet.Transporting;
 using FishNet.Transporting.Tugboat;
@@ -23,6 +26,7 @@ namespace EMullen.Networking {
 
         [SerializeField]
         private NetworkConfiguration networkConfig;
+        [Space]
 
         [SerializeField] 
         private LocalConnectionState serverConnectionState;
@@ -31,6 +35,7 @@ namespace EMullen.Networking {
         private LocalConnectionState clientConnectionState;
         public LocalConnectionState ClientConnectionState => clientConnectionState;
 
+        [Space]
         [SerializeField]
         private KeyCode debugCanvasKeyCode = KeyCode.F3;
         [SerializeField]
@@ -68,9 +73,9 @@ namespace EMullen.Networking {
         /// <summary>
         /// Checks if the client is stated and we have a local connection to refer to.
         /// </summary>
-        public bool IsClientConnected => IsClientConnected && LocalConnection != null /* TODO: This needs to be if our local connection exists */;
+        public bool IsClientConnected => InstanceFinder.IsClientStarted && LocalConnection != null /* TODO: This needs to be if our local connection exists */;
 
-        public NetworkConnection LocalConnection => null; // TODO: This needs to be added
+        public NetworkConnection LocalConnection => InstanceFinder.ClientManager.Connection;
 #endregion
 
 #region Events
@@ -82,8 +87,6 @@ namespace EMullen.Networking {
 
         void Start() 
         {
-            Debug.LogWarning("This is not going to work without finishing NetworkController#LocalConnection field");
-
             networkManager = GetComponent<NetworkManager>();
 
             networkManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
@@ -185,5 +188,28 @@ namespace EMullen.Networking {
         }
 #endregion
 
+    }
+
+    public static class ExtensionMethods
+    {
+        public static NetworkConnection GetNetworkConnection(this NetworkManager networkManager, int connectionId)
+        {
+            if (networkManager == null) {
+                Debug.LogError("NetworkManager is not initialized.");
+                return null;
+            }
+
+            NetworkConnection networkConnection = networkManager.GetNetworkConnection(connectionId);
+
+            if (networkConnection == null)
+                Debug.LogWarning($"No NetworkConnection found for connection ID: {connectionId}");
+
+            return networkConnection;
+        }
+
+        public static NetworkConnection GetNetworkConnection(this NetworkIdentifierData networkIdentifierData) 
+        {
+            return InstanceFinder.NetworkManager.GetNetworkConnection(networkIdentifierData.clientID);
+        }
     }
 }

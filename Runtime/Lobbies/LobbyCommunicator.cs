@@ -5,6 +5,7 @@ using FishNet.Transporting;
 using UnityEngine;
 using EMullen.Core;
 using System;
+using EMullen.Networking.Lobby;
 
 namespace EMullen.Networking {
     /// <summary>

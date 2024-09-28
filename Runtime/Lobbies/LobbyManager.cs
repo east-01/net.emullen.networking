@@ -9,6 +9,9 @@ using FishNet.Transporting;
 using EMullen.SceneMgmt;
 using EMullen.Core;
 using EMullen.PlayerMgmt;
+using FishNet;
+using EMullen.Networking.Lobby;
+using FishNet.Managing.Scened;
 
 namespace EMullen.Networking {
     /// <summary>
@@ -26,8 +29,6 @@ namespace EMullen.Networking {
 
         public static LobbyManager Instance { get; private set; }
 
-        public readonly List<string> lobbyNames = new() { "Champ", "Craig", "Jeremiah", "Gabrial", "Sun", "Time", "Anchor", "Age" };
-
         [SerializeField]
         private string defaultSceneName;
         [SerializeField]
@@ -35,6 +36,8 @@ namespace EMullen.Networking {
 
         [SerializeField]
         private BLogChannel logSettings;
+        [SerializeField]
+        internal BLogChannel logSettingsGameLobby;
 
 #region Server side fields
         /// <summary>
@@ -54,6 +57,11 @@ namespace EMullen.Networking {
         // private readonly SyncDictionary<NetworkConnection, string> connectionLobbyPair = new();
         private readonly SyncDictionary<NetworkConnection, string> connectionLobbyPair = new();
         public int LobbyCount => lobbies.Count;
+
+        /// <summary>
+        /// Holds a dictionary of lobby ids and the list of scenelookupdatas they own.
+        /// </summary>
+        private Dictionary<string, List<SceneLookupData>> ownedScenes = new();
 #endregion
 
 #region Initializers
@@ -66,9 +74,6 @@ namespace EMullen.Networking {
             }
 
             Instance = this;
-            
-            if(GameLobby.PLAYER_WAIT_TIME <= 0)
-                Debug.LogWarning("GameLobby's PLAYER_WAIT_TIME is <= 0, this is not recommended.");
         }
 
         public override void OnStartServer()
@@ -108,9 +113,9 @@ namespace EMullen.Networking {
         {
             LobbyObjects.ForEach(lobby => lobby.Update());
 
-            if(Input.GetKeyDown(KeyCode.I)) {
-                BLog.Highlight(ServerDashboardController.GetDashboardText());
-            }
+            // if(Input.GetKeyDown(KeyCode.I)) {
+            //     BLog.Highlight(ServerDashboardController.GetDashboardText());
+            // }
         }
 
         /// <summary>
@@ -120,7 +125,7 @@ namespace EMullen.Networking {
         [Server]
         public GameLobby CreateLobby() 
         {
-            GameLobby newLobby = new(this, GenerateLobbyID());
+            GameLobby newLobby = new();
             lobbies.Add(newLobby.ID, newLobby);
             BLog.Log($"Created lobby \"{newLobby.ID}\"", logSettings, 0);
             return newLobby;
@@ -174,7 +179,7 @@ namespace EMullen.Networking {
 
             connectionLobbyPair.Add(client, lobbyToJoin.ID);
 
-            if(!lobbyToJoin.AddPlayers(client, playerUIDs)) {
+            if(!lobbyToJoin.AddAll(playerUIDs)) {
                 AbortJoin("Failed to join lobby.");
                 return;
             }
@@ -331,6 +336,51 @@ namespace EMullen.Networking {
         public void TargetRpcRecievedLobbyMessage(NetworkConnection client, string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) => LobbyCommunicator.Instance.DoNotUse_InvokeLobbyMessageEvent(lobbyID, sender, type, message);
 #endregion
 
+#region Lobby scene ownership
+        public List<SceneLookupData> GetOwnedScenes(string lobbyID) 
+        {
+            if(!ownedScenes.ContainsKey(lobbyID)) {
+                ownedScenes.Add(lobbyID, new());
+            }
+            return ownedScenes[lobbyID];
+        }
+
+        public bool CanClaimOwnership(string lobbyID, SceneLookupData sceneLookupData) 
+        {
+            return HasLobby(lobbyID) && GetOwner(sceneLookupData) != null;
+        }
+
+        public string GetOwner(SceneLookupData sceneLookupData) 
+        {
+            foreach(string lobbyID in ownedScenes.Keys) {
+                if(ownedScenes[lobbyID].Contains(sceneLookupData))
+                    return lobbyID;
+            }
+            return null;
+        }
+
+        public bool ClaimScene(string lobbyID, SceneLookupData sceneLookupData) 
+        {
+            if(!CanClaimOwnership(lobbyID, sceneLookupData)) {
+                return false;
+            }
+            List<SceneLookupData> scenes = GetOwnedScenes(lobbyID);
+            scenes.Add(sceneLookupData);
+            ownedScenes[lobbyID] = scenes;
+            return true;
+        }
+
+        public void UnclaimScene(SceneLookupData sceneLookupData) {
+            if(GetOwner(sceneLookupData) == null)
+                return;
+
+            string ownerID = GetOwner(sceneLookupData);
+            List<SceneLookupData> scenes = GetOwnedScenes(ownerID);
+            scenes.Remove(sceneLookupData);
+            ownedScenes[ownerID] = scenes;
+        }
+#endregion
+
 #region Matchmaking
         public GameLobby GetBestFitLobby(NetworkConnection client, List<string> players) 
         {
@@ -361,17 +411,7 @@ namespace EMullen.Networking {
             return new List<string>() { lobbyToJoin.ID };
         }
 
-        [Server]
-        private string GenerateLobbyID() 
-        {
-            for(int attempt = 0; attempt < lobbyNames.Count; attempt++) {
-                string selection = lobbyNames[UnityEngine.Random.Range(0, lobbyNames.Count)];
-                if(GetLobby(selection) == null)
-                    return selection;
-            }
-            Debug.LogWarning("Ran out of new lobby ids!");
-            return "Lobby";
-        }
+        
 #endregion
 
 #region Messages and Message handling
@@ -383,49 +423,7 @@ namespace EMullen.Networking {
         /// </summary>
         public void LobbyCommunicator_LobbyMessageEvent(string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) 
         {
-            BLog.Highlight("Recieved message: " + message);
-            if(type == LobbyMessageType.ACTION) {
-                switch(message) {
-                    case LME_CMD_REQUEST_FORCE_MAP_PICK:
-                        if(!IsServerInitialized)
-                            return;
-
-                        // if(!DevSettings.IsDevelopment()) {
-                        //     Debug.LogWarning("Can't force map pick. We're not in a development build.");
-                        //     return;
-                        // }
-                        GameLobby lobby = GetLobby(sender);
-                        if(lobby == null) {
-                            Debug.LogError("Can't force map pick, client is not in a lobby.");
-                            return;
-                        }
-
-                        lobby.state = LobbyState.MAP_SELECTION;
-                        lobby.forceMapPick = true;
-                        break;
-                    case LME_CMD_REQUEST_LOBBY_MOVE:
-                        if(!IsServerInitialized)
-                            return;
-
-                        if(sender == null) {
-                            Debug.LogError("Can't handle request lobby move, sender is null.");
-                            return;
-                        }
-
-                        lobby = GetLobby(sender);
-                        if(lobby == null) {
-                            Debug.LogError("Can't move client to lobby, they are not in one.");
-                            return;
-                        }
-                        BLog.Log($"Client \"{sender}\" requested to move to lobby", logSettings, 0);
-                        if(IsHostStarted)
-                            SceneController.Instance.LoadScene(new(lobbySceneName), false);
-                        else
-                            NetSceneController.Instance.TargetRpcLoadScene(sender, new(lobbySceneName), false);
-
-                        break;
-                }
-            }
+            
         }
 #endregion
 

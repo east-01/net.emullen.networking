@@ -8,8 +8,10 @@ using FishNet.Object.Synchronizing;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using EMullen.Core;
+using EMullen.SceneMgmt;
+using EMullen.PlayerMgmt;
 
-namespace EMullen.Networking {
+namespace EMullen.Networking.Lobby {
     /// <summary>
     /// The GameLobby resides on the server and will delegate what to do with the players.
     /// Clients will get information about the lobby via the LobbyData struct.
@@ -17,162 +19,81 @@ namespace EMullen.Networking {
     public class GameLobby 
     {
 
-        public GameLobby() {}
+        public static int PlayerLimit = 8;
+        public static readonly List<string> LobbyNames = new() { "Champ", "Craig", "Jeremiah", "Gabrial", "Sun", "Time", "Anchor", "Age" };
 
-        public static readonly float PLAYER_WAIT_TIME = 20;
-        public static readonly float ROUND_END_TIME = 15;
-        public static readonly float MAP_PICK_TIME = 3;
-        public static readonly KeyCode FORCE_MAP_PICK_KEY = KeyCode.F4;
+        public GameLobbySceneManager GLSceneManager { get; private set; }
 
-        private LobbyManager manager;
-        private string id;
+        public string ID { get; private set; }
+        public string MessagePrefix => $"({ID}) ";
 
-        private LobbyState _state;
-        public LobbyState state { 
-            get { return _state; }
+        private LobbyState state;
+        public LobbyState State { 
+            get { return state; }
             set {
-                BLog.Log($"{MessagePrefix}Setting state to {value}", LogChannel.GameLobby, 1);
-                LobbyState prevState = _state;
-                _state = value;
-                timeInState = 0;
-                LobbyStateChanged(prevState, _state);
-                if(manager.HasLobby(id))
-                    manager.UpdateLobby(id, LobbyUpdateReason.STATE_CHANGE);
+                BLog.Log($"{MessagePrefix}Setting state to {value.GetType()}", LobbyManager.Instance.logSettingsGameLobby, 1);
+                LobbyState prevState = state;
+                state = value;
+                LobbyStateChangedEvent?.Invoke(prevState, state);
+                if(LobbyManager.Instance.HasLobby(ID))
+                    LobbyManager.Instance.UpdateLobby(ID, LobbyUpdateReason.STATE_CHANGE);
             }
         }
-        private float timeInState;
 
-        // private Dictionary<NetworkConnection, PlayerData> players = new(); // Players in lobby
-        private List<PlayerData> players = new();
+        private readonly List<string> playerUIDs = new();
 
-        /* Scene related */
-        private SceneLookupData mapSceneData;
+        public int PlayerCount => playerUIDs.Count;
+        public int OpenSlots => PlayerLimit - playerUIDs.Count;
 
-        /* Game related */
-        private KartLevel? level;
-        private bool CanAutoSelectLevel { get { return CoreManager.IsMultiplayer && !DevSettings.Settings.ManualLobbyPlayerWaitSwitch; } }
-        public bool forceMapPick = false;
-        private GameplayManager gameplayManager;
+        public List<PlayerData> PlayerDatas => playerUIDs.Select(uid => PlayerDataRegistry.Instance.GetPlayerData(uid)).ToList();
+        public List<NetworkConnection> Connections => PlayerDatas.Select(pd => pd.GetData<NetworkIdentifierData>().GetNetworkConnection()).Distinct().ToList();
 
-        public GameLobby(LobbyManager manager, string id) 
+#region Events
+        public delegate void LobbyStateChanged(LobbyState prevState, LobbyState newState);
+        public event LobbyStateChanged LobbyStateChangedEvent;
+#endregion
+
+        public GameLobby() 
         {
-            this.manager = manager;
-            this.id = id;
+            GLSceneManager = new GameLobbySceneManager(this);
+            ID = GenerateLobbyID();
 
-            BLog.Log($"Initialized lobby \"{id}\"", LogChannel.GameLobby, 0);
-            SceneController.Instance.SceneRegisteredEvent += SceneDelegate_SceneRegistered;
-            SceneController.Instance.SceneWillDeregisterEvent += SceneDelegate_SceneWillDeregister;
-            SceneController.Instance.SceneDeregisteredEvent += SceneDelegate_SceneDeregistered;
-
-            state = LobbyState.WAITING_FOR_PLAYERS;
-            level = null;
-
-            string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
-            if(CoreManager.IsLocal && SceneNames.IsMapScene(sceneName)) {
-                state = LobbyState.RACING;
-                level = CoreManager.LevelAtlas.SearchEnumBySceneName(sceneName);
-            }
+            BLog.Log($"Initialized lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
         }
 
         public void Delete() 
         {
-            BLog.Log($"{MessagePrefix}Deleting self...", LogChannel.GameLobby, 0);
-
-            SceneController.Instance.SceneRegisteredEvent -= SceneDelegate_SceneRegistered;
-            SceneController.Instance.SceneWillDeregisterEvent -= SceneDelegate_SceneWillDeregister;
-            SceneController.Instance.SceneDeregisteredEvent -= SceneDelegate_SceneDeregistered;
-
-            if(PlayerCount > 0) {
-                // TODO: Add disconnect message
-                MovePlayersToLobby();
-            }
-
-            if(MapScene != null) {
-                NetSceneController.Instance.UnloadSceneAsServer(mapSceneData);
-            }
+            BLog.Log($"{MessagePrefix}Deleting self...", LobbyManager.Instance.logSettingsGameLobby, 0);
         }
 
         public void Update() 
         {
-            // State management
-            timeInState += Time.deltaTime;
-
-            if(Input.GetKeyDown(FORCE_MAP_PICK_KEY))
-                forceMapPick = true;
-
-            if(PlayerCount == 0) {
-                NetSceneController.LobbyManager.DeleteLobby(ID);
+            if(State != null) {
+                State.Update();
+                LobbyState newState = State.CheckForStateChange();
+                if(newState != null) {
+                    State = newState;
+                }
             }
-
-            CheckState();
         }  
 
-#region State Management
         /// <summary>
-        /// Checks the current state and attempts to escalate to the next state.
-        /// Can only escalate state once per frame.
+        /// Searches for a lobby id that isn't taken.
         /// </summary>
-        public void CheckState() 
+        public static string GenerateLobbyID() 
         {
-            switch(state) {
-                case LobbyState.WAITING_FOR_PLAYERS:
-                    bool timePassed = CanAutoSelectLevel && timeInState >= PLAYER_WAIT_TIME;
-                    bool noAvailableSpace = CanAutoSelectLevel && !DevSettings.Settings.ManualLobbyPlayerWaitSwitch && OpenSlots == 0;
-                    if(Input.GetKeyDown(FORCE_MAP_PICK_KEY) || 
-                    noAvailableSpace || 
-                    timePassed || 
-                    CoreManager.IsLocal) {
-                        BLog.Log($"Advanced to map selection via ForceMapPick: {Input.GetKeyDown(FORCE_MAP_PICK_KEY)}, noAvailableSpace: {noAvailableSpace}, timePassed: {timePassed}, local: {CoreManager.IsLocal}", LogChannel.GameLobby);
-                        state = LobbyState.MAP_SELECTION;
-                    }
-                    break;
-                case LobbyState.MAP_SELECTION:
-                    bool autoSelectValid = CanAutoSelectLevel && timeInState >= MAP_PICK_TIME;
-                    if(level == null && (autoSelectValid || forceMapPick)) {
-                        forceMapPick = false;
-                        KartLevel? selectedLevel;
-                        if(DevSettings.Settings.OverrideMapPick)
-                            selectedLevel = DevSettings.Settings.Map;
-                        else 
-                            selectedLevel = LevelAtlas.PickRandomLevel();
-
-                        SetLevel(selectedLevel.Value);
-                    } else if(level != null && MapScene != null/* && gameplayManager != null*/) {
-                        MovePlayersToMap();                    
-                        state = LobbyState.RACING;
-                    }
-                    break;
-                case LobbyState.RACING:
-                    if(gameplayManager == null)
-                        return;
-
-                    if(gameplayManager.RaceManager.Phase == RacePhase.FINISHED) {
-                        AwardPoints();
-                        state = LobbyState.POST_RACE;
-                    }
-                    break;
-                case LobbyState.POST_RACE:
-                    if(mapSceneData == null || !NetSceneController.Instance.IsSceneRegistered(mapSceneData)) {
-                        MovePlayersToLobby();
-                        state = LobbyState.WAITING_FOR_PLAYERS;
-                    } else if(NetSceneController.Instance.GetSceneElements(mapSceneData).Clients.Count == 0) {
-                        state = LobbyState.WAITING_FOR_PLAYERS;
-                    } else if(CoreManager.IsMultiplayer && timeInState >= ROUND_END_TIME) {
-                        MovePlayersToLobby();
-                        state = LobbyState.WAITING_FOR_PLAYERS;
-                    }
-                    break;
+            if(!InstanceFinder.IsServerStarted) {
+                Debug.LogWarning("Generated a lobby id as a client, not sure why you need it ¯\\_(ツ)_/¯");
+                return "Lobby";
             }
-        }
-
-        private void LobbyStateChanged(LobbyState prev, LobbyState current) 
-        {
-            if(current == LobbyState.MAP_SELECTION) {
-                if(level != null)
-                    Debug.LogWarning($"Entering map selection while the level isn't null, still on level \"{level}\"");
+            for(int attempt = 0; attempt < LobbyNames.Count; attempt++) {
+                string selection = LobbyNames[UnityEngine.Random.Range(0, LobbyNames.Count)];
+                if(LobbyManager.Instance.GetLobby(selection) == null)
+                    return selection;
             }
+            Debug.LogWarning("Ran out of new lobby ids!");
+            return "Lobby";
         }
-#endregion
 
 #region Player Management
         /// <summary>
@@ -183,17 +104,22 @@ namespace EMullen.Networking {
         /// <param name="conn">The connection that is going to be added to this lobby.</param>
         /// <param name="data">The data that this individual player has</param>
         /// <returns>Success status</returns>
-        public bool AddPlayer(NetworkConnection conn, PlayerData data) 
+        public bool Add(string playerUID) 
         {
-            string currentLobbyID = NetSceneController.LobbyManager.GetLobbyID(conn);
+            if(!PlayerDataRegistry.Instance.Contains(playerUID)) {
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby, they dont have PlayerData.", LobbyManager.Instance.logSettingsGameLobby, 0);
+                return false;
+            }
+            PlayerData pd = PlayerDataRegistry.Instance.GetPlayerData(playerUID);
+
+            string currentLobbyID = LobbyManager.Instance.GetLobbyID(pd.GetData<NetworkIdentifierData>().GetNetworkConnection());
             if(currentLobbyID != null && currentLobbyID != ID) {
-                BLog.Log($"{MessagePrefix} Failed to add player {data.Summary} to lobby \"{id}\" thir lobby id doesn't match!", LogChannel.GameLobby, 0);
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby \"{ID}\" thir lobby id doesn't match!", LobbyManager.Instance.logSettingsGameLobby, 0);
                 return false;
             }
 
-            data.connection = conn;
-            players.Add(data);
-            BLog.Log($"{MessagePrefix}Added player {data.Summary} to lobby \"{id}\"", LogChannel.GameLobby, 0);
+            playerUIDs.Add(playerUID);
+            BLog.Log($"{MessagePrefix}Added player {playerUID} to lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
             return true;
         }
 
@@ -204,248 +130,46 @@ namespace EMullen.Networking {
         /// <param name="conn">The connection that is going to be added to this lobby.</param>
         /// <param name="playerUIDs">The list of player's data that will be added to the lobby.</param>
         /// <returns>Success status</returns>
-        public bool AddPlayers(NetworkConnection conn, List<string> playerUIDs) {
+        public bool AddAll(List<string> playerUIDs) {
             foreach(string uid in playerUIDs) {
-                if(!AddPlayer(conn, uid))
+                if(!Add(uid))
                     return false;
             }
             return true;
         }
 
-        public void RemovePlayer(string playerUID) 
+        public void Remove(string playerUID) 
         {
-            if(!players.Contains(data)) {
-                Debug.LogError($"Can't remove playerdata \"{data}\" from lobby \"{ID}\", they're not in it.");
+            if(!playerUIDs.Contains(playerUID)) {
+                Debug.LogError($"Can't remove player {playerUID} from lobby \"{ID}\", they're not in it.");
                 return;
             }
-            BLog.Log($"{MessagePrefix}Removed player {data.Summary} from lobby \"{id}\"", LogChannel.GameLobby, 0);
-            players.Remove(data);
+            BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
+            playerUIDs.Remove(playerUID);
         }
 
         public void RemoveClientsPlayers(NetworkConnection client, out bool yieldsEmptyLobby) {
-            List<PlayerData> clientsPlayers = GetClientsPlayers(client);
-            yieldsEmptyLobby = PlayerCount-clientsPlayers.Count == 0;
-            clientsPlayers.ForEach(pd => RemovePlayer(pd));
-        }
-
-        /// <summary>
-        /// Moves all players in map scene back to lobby.
-        /// </summary>
-        public void MovePlayersToLobby() 
-        {
-            foreach(PlayerData othersData in players) {
-                NetSceneController.Instance.TargetRpcLoadScene(othersData.connection, new(SceneNames.MENU_LOBBY), false);
-            }
-        }
-
-        public void MovePlayersToMap() 
-        {
-            if(mapSceneData == null) {
-                Debug.LogError("Can't move players to map, map scene data is null.");
-                return;
-            }
-            if(!NetSceneController.Instance.IsSceneRegistered(mapSceneData)) {
-                Debug.LogError("Can't move players to map, the scene isn't registered");
-                return;
-            }
-
-            BLog.Log($"{MessagePrefix}Sending {players.Count} player(s) to map, is server: {InstanceFinder.IsServer} is client: {InstanceFinder.IsClient}", LogChannel.GameLobby, 0);
-            foreach(NetworkConnection client in Connections) {
-                NetSceneController.Instance.AddClientToScene(client, mapSceneData);
-            }
+            List<string> toRemove = PlayerDataRegistry.Instance.GetAllData().ToList().Where(data => data.HasData<NetworkIdentifierData>() && data.GetData<NetworkIdentifierData>().clientID == client.ClientId).Select(pd => pd.GetUID()).ToList();            
+            yieldsEmptyLobby = PlayerCount-toRemove.Count == 0;
+            toRemove.ForEach(uid => Remove(uid));
         }
 #endregion
-
-#region Administrative
-        /// <summary>
-        /// End the current round. Currently does multiple admin things:
-        ///   1. Award points
-        ///   2. Recall players to lobby
-        /// The map will automatically delete once all players are removed.
-        /// </summary>
-        public void CompleteRound() 
-        {
-            AwardPoints();
-
-            MovePlayersToLobby();
-        }
-
-        /// <summary>
-        /// Gets the placements dictionary from the RaceManager and adds the points awarded to each PlayerData.
-        /// </summary>
-        public void AwardPoints() 
-        {
-            if(gameplayManager == null) {
-                Debug.LogError("Can't award points, the gameplay manager is null.");
-                return;
-            }
-            if(gameplayManager.RaceManager.Phase != RacePhase.FINISHED) {
-                Debug.LogError("Can't award points, the RaceManager's phase isn't FINISHED");
-                return;
-            }
-
-            SyncDictionary<string, RacePlacementData> placements = gameplayManager.RaceManager.GetPlacements();
-            for(int i = 0; i < players.Count; i++) {
-                PlayerData data = players[i];
-                if(!placements.ContainsKey(data.uuid)) {
-                    Debug.LogWarning($"Tried to award points to \"{data.Summary}\" but they aren't in the placements dictionary.");
-                    continue;
-                }
-                data.points += placements[data.uuid].pointsAwarded;
-            }
-        }
-#endregion
-
-#region Scene/Level Management
-        /// <summary>
-        /// Set the level. Will load the corresponding scene on the server.
-        /// </summary>
-        public void SetLevel(KartLevel level) 
-        {   
-            if(this.level != null) {
-                Debug.LogError("Can't set level, one already exists");
-                return;
-            }
-            BLog.Log($"{MessagePrefix}Picked level {level} and requesting map scene.", LogChannel.GameLobby, 0);
-            this.level = level;
-
-            SceneLookupData newMapLookupData = new(CoreManager.LevelAtlas.RetrieveData(level).sceneName);
-            NetSceneController.Instance.LoadSceneAsServer(newMapLookupData);
-        }
-
-        public void SceneDelegate_SceneRegistered(SceneLookupData lookupData) 
-        {
-            SceneElements elements = NetSceneController.Instance.GetSceneElements(lookupData);
-            if(elements.HasOwner) {
-                Debug.LogError($"Can't claim newly registered scene \"{lookupData}\" because it already has an owner.");
-                return;
-            }
-
-            if(SceneNames.IsMapScene(lookupData.Name)) {
-                mapSceneData = lookupData;
-
-                GameplayManager gameplayManager = elements.GameplayManager;
-                if(gameplayManager != null) {
-                    RegisterGameplayManager(gameplayManager);
-                } else {
-                    Debug.LogError("Can't register gameplay manager, it's null.");
-                    return;
-                }
-            } else 
-                return;
-
-            elements.Owner = this;
-            elements.DeleteOnLastClientRemove = SceneNames.IsMapScene(lookupData.Name);
-            NetSceneController.Instance.SetSceneElements(lookupData, elements);
-
-            BLog.Log($"{MessagePrefix}Claimed scene \"{lookupData}\"", LogChannel.GameLobby, 0);
-        }
-
-        public void SceneDelegate_SceneWillDeregister(SceneLookupData lookupData) 
-        {
-            if(lookupData == mapSceneData) {
-                DeregisterGameplayManager();
-            }
-        }
-
-        public void SceneDelegate_SceneDeregistered(SceneLookupData lookupData) 
-        {
-            if(lookupData == mapSceneData) {
-                mapSceneData = null;
-            }
-        }
-
-        private void RegisterGameplayManager(GameplayManager gm) 
-        {
-            gameplayManager = gm;
-            gameplayManager.SetGameLobby(this);
-        }
-
-        private void DeregisterGameplayManager() 
-        {
-            level = null;
-
-            if(gameplayManager == null) {
-                Debug.LogError("Can't deregister GameplayManager because it is null.");
-                return;
-            }
-        }
-#endregion
-
-        public List<PlayerData> GetClientsPlayers(NetworkConnection client) 
-        {
-            List<PlayerData> clientsPlayers = new List<PlayerData>();
-            foreach(PlayerData pd in players) {
-                if(pd.connection == client) {
-                    clientsPlayers.Add(pd);
-                }
-            }
-            return clientsPlayers;
-        }
 
         public LobbyData Data { get {
-            List<PlayerData> players = new();
-            foreach(PlayerData data in this.players) { players.Add(data); }
-
             return new() {
-                players = players,
-                state = this.state,
-                timeInState = this.timeInState
+                players = playerUIDs,
+                stateID = this.State.GetID(),
+                timeInState = State != null ? State.TimeInState : -1
             };
         } }
-
-        public string ID { get { return id; } }
-        public string MessagePrefix { get { return $"({ID}) "; } }
-        public SceneLookupData MapSceneData { get { return mapSceneData; } }
-        public LobbyState State { get { return state; } }
-        public Scene? MapScene { get { 
-            if(mapSceneData is null || !NetSceneController.Instance.IsSceneRegistered(mapSceneData))
-                return null;
-            return NetSceneController.Instance.GetSceneElements(mapSceneData).Scene;
-        } }
-
-        public GameplayManager GameplayManager { get { return gameplayManager; } }
-        public KartLevel? Level { get { return level; } }
-
-        public List<PlayerData> Players { get { return players; } }
-        public List<NetworkConnection> Connections { get {
-            List<NetworkConnection> connections = new();
-            foreach(PlayerData pd in players) {
-                if(!connections.Contains(pd.connection))
-                    connections.Add(pd.connection);
-            }
-            return connections;
-        } }
-        public int PlayerCount { get { return players.Count; } }
-
-        public int OpenSlots { get { return CoreManager.Instance.PlayerLimit - players.Count; } }
-
-        public MenuLobbyController MenuLobbyController { get {
-            MenuLobbyController[] lobbyControllers = GameObject.FindObjectsOfType<MenuLobbyController>();
-            if(lobbyControllers.Length != 1) {
-                Debug.LogError($"Found != 1 MenuLobbyControllers ({lobbyControllers.Length})");
-                return null;
-            }
-            return lobbyControllers[0];
-        } }
-
     }
 
     [Serializable]
     public struct LobbyData 
     {
-        public List<PlayerData> players;
-        public LobbyState state;
+        public List<string> players;
+        public string stateID;
         public float timeInState;
-    }
-
-    [Serializable]
-    public enum LobbyState 
-    {
-        WAITING_FOR_PLAYERS, 
-        MAP_SELECTION, 
-        RACING, // The lobby is in game
-        POST_RACE
     }
 
     public enum LobbyUpdateReason 
