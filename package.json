@@ -8,9 +8,7 @@
   "documentationUrl": "",
   "changelogUrl": "",
   "licensesUrl": "",
-  "dependencies": {
-    "net.emullen.networking": "file:"
-  },
+  "dependencies": {},
   "keywords": [],
   "author": {
     "name": "Ethan Mullen",
