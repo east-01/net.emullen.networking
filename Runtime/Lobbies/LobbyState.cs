@@ -4,13 +4,15 @@ namespace EMullen.Networking.Lobby
 {
     public abstract class LobbyState 
     {
-    
+        
+        protected GameLobby gameLobby;
         private float initTime;
         public float TimeInState => Time.time-initTime;
 
-        public LobbyState() 
+        public LobbyState(GameLobby gameLobby) 
         {
-            initTime = Time.time;
+            this.gameLobby = gameLobby;
+            this.initTime = Time.time;
         }
 
         public virtual void Update() {}
