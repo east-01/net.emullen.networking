@@ -10,6 +10,7 @@ using UnityEngine.SceneManagement;
 using EMullen.Core;
 using EMullen.SceneMgmt;
 using EMullen.PlayerMgmt;
+using System.Collections.ObjectModel;
 
 namespace EMullen.Networking.Lobby {
     /// <summary>
@@ -31,7 +32,7 @@ namespace EMullen.Networking.Lobby {
         public LobbyState State { 
             get { return state; }
             set {
-                BLog.Log($"{MessagePrefix}Setting state to {value.GetType()}", LobbyManager.Instance.logSettingsGameLobby, 1);
+                BLog.Log($"{MessagePrefix}Setting state to {value.GetType()}", LobbyManager.Instance.LogSettingsGameLobby, 1);
                 LobbyState prevState = state;
                 state = value;
                 LobbyStateChangedEvent?.Invoke(prevState, state);
@@ -40,12 +41,13 @@ namespace EMullen.Networking.Lobby {
             }
         }
 
-        private readonly List<string> playerUIDs = new();
+        private readonly List<string> players = new();
+        public ReadOnlyCollection<string> Players => players.AsReadOnly(); 
 
-        public int PlayerCount => playerUIDs.Count;
-        public int OpenSlots => PlayerLimit - playerUIDs.Count;
+        public int PlayerCount => players.Count;
+        public int OpenSlots => PlayerLimit - players.Count;
 
-        public List<PlayerData> PlayerDatas => playerUIDs.Select(uid => PlayerDataRegistry.Instance.GetPlayerData(uid)).ToList();
+        public List<PlayerData> PlayerDatas => players.Select(uid => PlayerDataRegistry.Instance.GetPlayerData(uid)).ToList();
         public List<NetworkConnection> Connections => PlayerDatas.Select(pd => pd.GetData<NetworkIdentifierData>().GetNetworkConnection()).Distinct().ToList();
 
 #region Events
@@ -58,12 +60,12 @@ namespace EMullen.Networking.Lobby {
             GLSceneManager = new GameLobbySceneManager(this);
             ID = GenerateLobbyID();
 
-            BLog.Log($"Initialized lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
+            BLog.Log($"Initialized lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
         }
 
         public void Delete() 
         {
-            BLog.Log($"{MessagePrefix}Deleting self...", LobbyManager.Instance.logSettingsGameLobby, 0);
+            BLog.Log($"{MessagePrefix}Deleting self...", LobbyManager.Instance.LogSettingsGameLobby, 0);
         }
 
         public void Update() 
@@ -107,19 +109,19 @@ namespace EMullen.Networking.Lobby {
         public bool Add(string playerUID) 
         {
             if(!PlayerDataRegistry.Instance.Contains(playerUID)) {
-                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby, they dont have PlayerData.", LobbyManager.Instance.logSettingsGameLobby, 0);
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby, they dont have PlayerData.", LobbyManager.Instance.LogSettingsGameLobby, 0);
                 return false;
             }
             PlayerData pd = PlayerDataRegistry.Instance.GetPlayerData(playerUID);
 
             string currentLobbyID = LobbyManager.Instance.GetLobbyID(pd.GetData<NetworkIdentifierData>().GetNetworkConnection());
             if(currentLobbyID != null && currentLobbyID != ID) {
-                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby \"{ID}\" thir lobby id doesn't match!", LobbyManager.Instance.logSettingsGameLobby, 0);
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby \"{ID}\" thir lobby id doesn't match!", LobbyManager.Instance.LogSettingsGameLobby, 0);
                 return false;
             }
 
-            playerUIDs.Add(playerUID);
-            BLog.Log($"{MessagePrefix}Added player {playerUID} to lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
+            players.Add(playerUID);
+            BLog.Log($"{MessagePrefix}Added player {playerUID} to lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
             return true;
         }
 
@@ -140,12 +142,12 @@ namespace EMullen.Networking.Lobby {
 
         public void Remove(string playerUID) 
         {
-            if(!playerUIDs.Contains(playerUID)) {
+            if(!players.Contains(playerUID)) {
                 Debug.LogError($"Can't remove player {playerUID} from lobby \"{ID}\", they're not in it.");
                 return;
             }
-            BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
-            playerUIDs.Remove(playerUID);
+            BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            players.Remove(playerUID);
         }
 
         public void RemoveClientsPlayers(NetworkConnection client, out bool yieldsEmptyLobby) {
@@ -157,8 +159,8 @@ namespace EMullen.Networking.Lobby {
 
         public LobbyData Data { get {
             return new() {
-                players = playerUIDs,
-                stateID = this.State.GetID(),
+                playerUIDs = players,
+                stateTypeString = this.State.GetType().Name,
                 timeInState = State != null ? State.TimeInState : -1
             };
         } }
@@ -167,8 +169,8 @@ namespace EMullen.Networking.Lobby {
     [Serializable]
     public struct LobbyData 
     {
-        public List<string> players;
-        public string stateID;
+        public List<string> playerUIDs;
+        public string stateTypeString;
         public float timeInState;
     }
 

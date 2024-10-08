@@ -1,7 +1,11 @@
+using System;
 using System.Collections.Generic;
 using EMullen.Core;
+using EMullen.PlayerMgmt;
 using EMullen.SceneMgmt;
 using FishNet;
+using FishNet.Component.Prediction;
+using FishNet.Connection;
 using FishNet.Managing.Scened;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -61,7 +65,7 @@ namespace EMullen.Networking.Lobby
             }
 
             LobbyManager.Instance.ClaimScene(Lobby.ID, lookupData);
-            BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", LobbyManager.Instance.logSettingsGameLobby, 0);
+            BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
         }
 
         public void SceneDelegate_SceneWillDeregister(SceneLookupData lookupData) 
@@ -79,5 +83,26 @@ namespace EMullen.Networking.Lobby
             }
         }
 
+        /// <summary>
+        /// Send all players to the specified scene with lookupData. If shouldTrack is false, the
+        ///   player will load it as a local scene for themselves, disconnected from any server's
+        ///   scenes.
+        /// </summary>
+        public void SendAllPlayersToScene(SceneLookupData lookupData, bool shouldTrack = true)
+        {
+            if(!NetSceneController.Instance.IsSceneRegistered(lookupData)) {
+                Debug.LogError($"Can't sent players to scene \"{lookupData}\" it is not registered.");
+                return;
+            }
+
+            foreach(string playerUID in Lobby.Players) {
+                NetworkConnection playerConn = PlayerDataRegistry.Instance.GetPlayerData(playerUID).GetData<NetworkIdentifierData>().GetNetworkConnection();
+                if(shouldTrack) {
+                    NetSceneController.Instance.AddClientToScene(playerConn, lookupData);
+                } else {
+                    NetSceneController.Instance.TargetRpcLoadScene(playerConn, lookupData, false);
+                }
+            }
+        }
     }
 }

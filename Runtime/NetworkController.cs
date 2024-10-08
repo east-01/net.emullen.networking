@@ -168,23 +168,29 @@ namespace EMullen.Networking {
         private void ServerManager_OnServerConnectionState(ServerConnectionStateArgs args)
         {
             serverConnectionState = args.ConnectionState;
-            if(serverConnectionState != LocalConnectionState.Stopped) {
-                serverStatusText.gameObject.SetActive(true);
-                serverStatusText.text = "Server: " + serverConnectionState;
-            } else {
-                serverStatusText.gameObject.SetActive(false);
-            }
+            if(serverStatusText != null) {
+                if(serverConnectionState != LocalConnectionState.Stopped) {
+                    serverStatusText.gameObject.SetActive(true);
+                    serverStatusText.text = "Server: " + serverConnectionState;
+                } else {
+                    serverStatusText.gameObject.SetActive(false);
+                }
+            } else
+                Debug.LogWarning("No server status text to change ");
         }
 
         private void ClientManager_OnClientConnectionState(ClientConnectionStateArgs args)
         {
             clientConnectionState = args.ConnectionState;
-            if(clientConnectionState != LocalConnectionState.Stopped) {
-                clientStatusText.gameObject.SetActive(true);
-                clientStatusText.text = "Client: " + clientConnectionState;
-            } else {
-                clientStatusText.gameObject.SetActive(false);
-            }
+            if(clientStatusText != null) {
+                if(clientConnectionState != LocalConnectionState.Stopped) {
+                    clientStatusText.gameObject.SetActive(true);
+                    clientStatusText.text = "Client: " + clientConnectionState;
+                } else {
+                    clientStatusText.gameObject.SetActive(false);
+                }
+            } else 
+                Debug.LogWarning("No server status text to change ");
         }
 #endregion
 

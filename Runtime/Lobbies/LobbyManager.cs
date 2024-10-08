@@ -37,7 +37,8 @@ namespace EMullen.Networking {
         [SerializeField]
         private BLogChannel logSettings;
         [SerializeField]
-        internal BLogChannel logSettingsGameLobby;
+        private BLogChannel logSettingsGameLobby;
+        public BLogChannel LogSettingsGameLobby => logSettingsGameLobby;
 
 #region Server side fields
         /// <summary>

@@ -21,7 +21,6 @@ namespace EMullen.Networking.Lobby
         /// </summary>
         /// <returns>The lobby state that we'll be transitioning to.</returns>
         public abstract LobbyState CheckForStateChange();
-        public abstract string GetID();
 
     }
 }
