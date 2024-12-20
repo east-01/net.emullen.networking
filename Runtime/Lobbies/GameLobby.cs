@@ -160,11 +160,11 @@ namespace EMullen.Networking.Lobby {
         public LobbyData Data { get {
             return new() {
                 playerUIDs = players,
-                stateTypeString = this.State.GetType().Name,
+                stateTypeString = this.State != null ? this.State.GetType().Name : "null",
                 timeInState = State != null ? State.TimeInState : -1
             };
         } }
-    }
+    } 
 
     [Serializable]
     public struct LobbyData 

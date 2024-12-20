@@ -12,6 +12,8 @@ using EMullen.PlayerMgmt;
 using FishNet;
 using EMullen.Networking.Lobby;
 using FishNet.Managing.Scened;
+using UnityEngine.SceneManagement;
+using System.Collections;
 
 namespace EMullen.Networking {
     /// <summary>
@@ -65,6 +67,13 @@ namespace EMullen.Networking {
         private Dictionary<string, List<SceneLookupData>> ownedScenes = new();
 #endregion
 
+#region Client side fields
+        /// <summary>
+        /// A float value representing the last time we added all local players to the lobby.
+        /// </summary>
+        private float lastAddTime;
+#endregion
+
 #region Initializers
         private void Awake() 
         {
@@ -75,6 +84,10 @@ namespace EMullen.Networking {
             }
 
             Instance = this;
+            BLog.Highlight("INSTANTIATED LOBBY MANAGER");
+
+            InstantiateLobbyAction = InstantiateLobby;
+            lastAddTime = -1;
         }
 
         public override void OnStartServer()
@@ -89,13 +102,6 @@ namespace EMullen.Networking {
             ServerManager.OnRemoteConnectionState -= ServerManager_OnRemoteConnectionState;
         }
 
-        public override void OnStartClient() 
-        {
-            base.OnStartClient();
-
-            AddToLobby(LocalConnection, PlayerManager.Instance.LocalPlayers.Select(lp => lp.UID).ToList());
-        }
-
         public override void OnStopClient()
         {
             base.OnStopClient();
@@ -105,14 +111,21 @@ namespace EMullen.Networking {
             // The "server side view" is in LobbyManager#ServerManager_OnRemoteConnectionState
             if(LobbyCommunicator.Instance.InLobby) {
                 LobbyCommunicator.Instance.StopCommunication("Lost connection with server.", true);
-                SceneController.Instance.LoadScene(new(defaultSceneName), false);
+                UnityEngine.SceneManagement.SceneManager.LoadScene(defaultSceneName, LoadSceneMode.Single);
             }
         }
 #endregion
 
-        private void Update() 
+        private void Update()  
         {
             LobbyObjects.ForEach(lobby => lobby.Update());
+
+            if(InstanceFinder.IsClientStarted && LobbyCommunicator.Instance.LobbyData == null && (lastAddTime == -1 || Time.time - lastAddTime > 10f)) {
+                BLog.Highlight("Is client started: " + InstanceFinder.IsClientStarted + " or is host: " + InstanceFinder.IsHostStarted);
+                AddToLobby(LocalConnection, PlayerManager.Instance.LocalPlayers.Where(lp => lp != null).Select(lp => lp.UID).ToList());            
+                BLog.Highlight("Added all");
+                lastAddTime = Time.time;
+            }
 
             // if(Input.GetKeyDown(KeyCode.I)) {
             //     BLog.Highlight(ServerDashboardController.GetDashboardText());
@@ -120,18 +133,29 @@ namespace EMullen.Networking {
         }
 
         /// <summary>
+        /// The function we use to create a lobby, override if you want to use custom lobby types.
+        /// </summary>
+        public Func<GameLobby> InstantiateLobbyAction;
+
+        /// <summary>
         /// Creates and adds a lobby to the server.
         /// </summary>
         /// <returns></returns>
-        [Server]
         public GameLobby CreateLobby() 
         {
-            GameLobby newLobby = new();
+            GameLobby newLobby = InstantiateLobbyAction.Invoke();
             lobbies.Add(newLobby.ID, newLobby);
             BLog.Log($"Created lobby \"{newLobby.ID}\"", logSettings, 0);
             return newLobby;
         }
 
+        /// <summary>
+        /// Default InstantiateLobbyAction, creates a default lobby.
+        /// </summary>
+        public GameLobby InstantiateLobby() {
+            return new GameLobby();
+        }
+        
         [Server]
         public void DeleteLobby(string lobbyID) 
         {
@@ -346,9 +370,9 @@ namespace EMullen.Networking {
             return ownedScenes[lobbyID];
         }
 
-        public bool CanClaimOwnership(string lobbyID, SceneLookupData sceneLookupData) 
+        public bool CanClaimOwnership(string lobbyID, SceneLookupData sceneLookupData)  
         {
-            return HasLobby(lobbyID) && GetOwner(sceneLookupData) != null;
+            return HasLobby(lobbyID) && GetOwner(sceneLookupData) == null;
         }
 
         public string GetOwner(SceneLookupData sceneLookupData) 

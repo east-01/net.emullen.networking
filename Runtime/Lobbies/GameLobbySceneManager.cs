@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using EMullen.Core;
 using EMullen.PlayerMgmt;
 using EMullen.SceneMgmt;
@@ -24,29 +25,37 @@ namespace EMullen.Networking.Lobby
         public GameLobby Lobby { get; private set;}
 
         public SceneLookupData MapSceneData { get; private set; }
-        public Scene? MapScene { get { 
-            if(MapSceneData is null || !NetSceneController.Instance.IsSceneRegistered(MapSceneData))
-                return null;
-            return NetSceneController.Instance.GetSceneElements(MapSceneData).Scene;
-        } }
+        public Scene? MapScene { get; private set; }
 
         public List<SceneLookupData> OwnedScenes => LobbyManager.Instance.GetOwnedScenes(Lobby.ID);
 
         public GameLobbySceneManager(GameLobby lobby) 
         {
             Lobby = lobby;
-            SceneController.Instance.SceneRegisteredEvent += SceneDelegate_SceneRegistered;
-            SceneController.Instance.SceneWillDeregisterEvent += SceneDelegate_SceneWillDeregister;
-            SceneController.Instance.SceneDeregisteredEvent += SceneDelegate_SceneDeregistered;
 
+            InstanceFinder.SceneManager.OnLoadEnd += FishNetSceneManager_OnLoadEnd;
         }
 
         ~GameLobbySceneManager() 
         {
-            SceneController.Instance.SceneRegisteredEvent -= SceneDelegate_SceneRegistered;
-            SceneController.Instance.SceneWillDeregisterEvent -= SceneDelegate_SceneWillDeregister;
-            SceneController.Instance.SceneDeregisteredEvent -= SceneDelegate_SceneDeregistered;
+            InstanceFinder.SceneManager.OnLoadEnd -= FishNetSceneManager_OnLoadEnd;
+        }
 
+        private void FishNetSceneManager_OnLoadEnd(SceneLoadEndEventArgs args)
+        {
+            Scene[] loadedScenes = args.LoadedScenes;
+
+            foreach(Scene scene in loadedScenes) {
+                SceneLookupData lookupData = scene.GetSceneLookupData();
+
+                if(!LobbyManager.Instance.CanClaimOwnership(Lobby.ID, lookupData)) {
+                    Debug.LogError($"Can't claim newly loaded scene \"{lookupData}\" because it already has an owner.");
+                    return;
+                }
+
+                LobbyManager.Instance.ClaimScene(Lobby.ID, lookupData);
+                BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            }
         }
 
         /// <summary>
@@ -57,51 +66,19 @@ namespace EMullen.Networking.Lobby
 
         }
 
-        public void SceneDelegate_SceneRegistered(SceneLookupData lookupData) 
-        {
-            if(!LobbyManager.Instance.CanClaimOwnership(Lobby.ID, lookupData)) {
-                Debug.LogError($"Can't claim newly registered scene \"{lookupData}\" because it already has an owner.");
-                return;
-            }
-
-            LobbyManager.Instance.ClaimScene(Lobby.ID, lookupData);
-            BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
-        }
-
-        public void SceneDelegate_SceneWillDeregister(SceneLookupData lookupData) 
-        {
-            
-        }
-
-        public void SceneDelegate_SceneDeregistered(SceneLookupData lookupData) 
-        {
-            if(!InstanceFinder.IsServerStarted)
-                return;
-
-            if(LobbyManager.Instance.GetOwner(lookupData) == Lobby.ID) {
-                NetSceneController.Instance.UnloadSceneAsServer(lookupData);
-            }
-        }
-
         /// <summary>
         /// Send all players to the specified scene with lookupData. If shouldTrack is false, the
         ///   player will load it as a local scene for themselves, disconnected from any server's
         ///   scenes.
         /// </summary>
-        public void SendAllPlayersToScene(SceneLookupData lookupData, bool shouldTrack = true)
+        public void LoadPlayersScene(SceneLookupData lookupData)
         {
-            if(!NetSceneController.Instance.IsSceneRegistered(lookupData)) {
-                Debug.LogError($"Can't sent players to scene \"{lookupData}\" it is not registered.");
-                return;
-            }
+            SceneSyncBroadcast broadcast = new(new() { lookupData });
 
             foreach(string playerUID in Lobby.Players) {
+                // Retrieve the network connection related to the players uid
                 NetworkConnection playerConn = PlayerDataRegistry.Instance.GetPlayerData(playerUID).GetData<NetworkIdentifierData>().GetNetworkConnection();
-                if(shouldTrack) {
-                    NetSceneController.Instance.AddClientToScene(playerConn, lookupData);
-                } else {
-                    NetSceneController.Instance.TargetRpcLoadScene(playerConn, lookupData, false);
-                }
+                InstanceFinder.ServerManager.Broadcast(playerConn, broadcast);
             }
         }
     }

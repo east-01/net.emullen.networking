@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using EMullen.PlayerMgmt;
 using FishNet;
 using FishNet.Connection;
@@ -26,6 +27,14 @@ namespace EMullen.Networking {
 
         [SerializeField]
         private NetworkConfiguration networkConfig;
+        public NetworkConfiguration NetworkConfig { 
+            get { return networkConfig; }
+            set { networkConfig = value;}
+        }
+
+        [SerializeField]
+        private List<NetworkConfiguration> networkConfigList;
+        
         [Space]
 
         [SerializeField] 
@@ -85,7 +94,19 @@ namespace EMullen.Networking {
         public event DisconnectedHandler DisconnectedEvent;
 #endregion
 
-        void Start() 
+        private void Awake() 
+        {
+            if(Instance != null) {
+                Debug.LogError($"The NetworkController singleton already exists but another is trying to instantiate. Deleting gameObject \"{gameObject.name}\"");
+                Destroy(gameObject);
+                return;
+            }
+            
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+
+        private void Start() 
         {
             networkManager = GetComponent<NetworkManager>();
 
@@ -134,11 +155,9 @@ namespace EMullen.Networking {
                 return;
             }
 
-            networkConfig.transport.SetServerBindAddress(networkConfig.serverBindAddress, networkConfig.ipAddressType);
-            networkConfig.transport.SetClientAddress(networkConfig.clientAddress);
-            networkConfig.transport.SetPort(networkConfig.port);
-
-            networkManager.TransportManager.Transport = networkConfig.transport;
+            networkManager.TransportManager.Transport.SetServerBindAddress(networkConfig.serverBindAddress, networkConfig.ipAddressType);
+            networkManager.TransportManager.Transport.SetClientAddress(networkConfig.clientAddress);
+            networkManager.TransportManager.Transport.SetPort(networkConfig.port);
 
             if(networkConfig.isServer)
                 networkManager.ServerManager.StartConnection();
@@ -194,23 +213,56 @@ namespace EMullen.Networking {
         }
 #endregion
 
+#region NetworkConfiguration Repository
+        /// <summary>
+        /// Retrieve a NetworkConfiguration object by its tag from the networkConfigList on the
+        ///   NetworkController singleton.
+        /// </summary>
+        /// <param name="tag">The tag string in the target NetworkConfiguration</param>
+        /// <returns>The target NetworkConfiguration if it's in the networkConfigList</returns>
+        public NetworkConfiguration GetNetworkConfiguration(string tag) 
+        {
+            foreach(NetworkConfiguration config in networkConfigList) {
+                if(config.tag == tag)
+                    return config;
+            }
+            Debug.LogError($"NetworkConfiguration with tag \"{tag}\" not in NetworkController#networkConfigList");
+            return null;
+        }
+#endregion
+
     }
 
     public static class ExtensionMethods
     {
         public static NetworkConnection GetNetworkConnection(this NetworkManager networkManager, int connectionId)
         {
+            if(!InstanceFinder.IsServerStarted) {
+                Debug.LogError("GetNetworkConnection can only be used on server instances.");
+                return null;
+            }
             if (networkManager == null) {
                 Debug.LogError("NetworkManager is not initialized.");
                 return null;
             }
 
-            NetworkConnection networkConnection = networkManager.GetNetworkConnection(connectionId);
+            // Local connection case
+            if(connectionId == -1) {
+                if(InstanceFinder.IsClientStarted) {
+                    return networkManager.ClientManager.Connection;
+                } else {
+                    Debug.LogError("Can't get NetworkConnection for connection ID -1, the client isn't started.");
+                    return null;
+                }
+            }
 
-            if (networkConnection == null)
+            // Search for connection in server manager's clients dictionary
+            if (networkManager.ServerManager.Clients.TryGetValue(connectionId, out NetworkConnection connection)) {
+                return connection;
+            } else {
                 Debug.LogWarning($"No NetworkConnection found for connection ID: {connectionId}");
-
-            return networkConnection;
+                return null;
+            }
         }
 
         public static NetworkConnection GetNetworkConnection(this NetworkIdentifierData networkIdentifierData) 

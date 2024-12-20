@@ -6,6 +6,8 @@ using UnityEngine;
 using EMullen.Core;
 using System;
 using EMullen.Networking.Lobby;
+using FishNet.Managing;
+using FishNet.Object;
 
 namespace EMullen.Networking {
     /// <summary>
@@ -22,27 +24,15 @@ namespace EMullen.Networking {
 
         [SerializeField]
         private BLogChannel logSettings;
+        [SerializeField]
+        private GameObject lobbyManagerPrefab;
 
         private bool retryUntilConnected = false;
 
         public string LobbyID { get; private set; }
-        public LobbyData? LobbyData { get; private set; }
+        public LobbyData? LobbyData { get; private set; }  
 
         public bool IsLocal = false;
-
-        public Action ConfigureNetwork = () => {
-            // if(DevSettings.IsDevelopment() || CoreManager.IsLocal)
-            //     CoreManager.NetworkStateManager.UseLocalTransport();
-            // else
-            //     CoreManager.NetworkStateManager.UseGlobalTransport();
-        };
-
-        public Action StartNetwork = () => {
-            // if(CoreManager.IsLocal)
-            //     CoreManager.NetworkStateManager.StartHost();
-            // else
-            //     CoreManager.NetworkStateManager.StartClient();
-        };
 
 #region Events
         /// <summary>
@@ -53,7 +43,7 @@ namespace EMullen.Networking {
         /// <param name="data">Initial LobbyData</param>
         public delegate void LobbyJoinedHandler(string lobbyID, LobbyData data);
         public event LobbyJoinedHandler LobbyJoinedEvent;
-        public void DoNotUse_InvokeLobbyJoinedEvent(string lobbyID, LobbyData data) => LobbyJoinedEvent?.Invoke(lobbyID, data); // please beat me up for this i dont know how to make it better though
+        internal void DoNotUse_InvokeLobbyJoinedEvent(string lobbyID, LobbyData data) => LobbyJoinedEvent?.Invoke(lobbyID, data);
         /// <summary>
         /// Event call for when the client leaves a lobby. The lobby leave reason is also provided 
         ///   in case of non-standard lobby exit (ban or server shutdown).
@@ -62,7 +52,7 @@ namespace EMullen.Networking {
         /// <param name="reason">The reason why the client left</param>
         public delegate void LobbyLeftHandler(string lobbyID, string reason);
         public event LobbyLeftHandler LobbyLeftEvent;
-        public void DoNotUse_InvokeLobbyLeftEvent(string lobbyID, string reason) => LobbyLeftEvent?.Invoke(lobbyID, reason);
+        internal void DoNotUse_InvokeLobbyLeftEvent(string lobbyID, string reason) => LobbyLeftEvent?.Invoke(lobbyID, reason);
         /// <summary>
         /// Event call for when the server issues a message. 
         /// </summary>
@@ -70,14 +60,14 @@ namespace EMullen.Networking {
         /// <param name="message">The message that the lobby sent</param>
         public delegate void LobbyMessageHandler(string lobbyID, NetworkConnection sender, LobbyMessageType type, string message);
         public event LobbyMessageHandler LobbyMessageEvent;
-        public void DoNotUse_InvokeLobbyMessageEvent(string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) => LobbyMessageEvent?.Invoke(lobbyID, sender, type, message);
+        internal void DoNotUse_InvokeLobbyMessageEvent(string lobbyID, NetworkConnection sender, LobbyMessageType type, string message) => LobbyMessageEvent?.Invoke(lobbyID, sender, type, message);
         /// <summary>
         /// Event call for when the lobby is updated, reason for update is also provided.
         /// </summary>
         /// <param name="lobbyID">Updated lobby ID</param>
         /// <param name="newData">New LobbyData</param>
         /// <param name="reason">The reason why the lobby updated</param>
-        public delegate void LobbyUpdateHandler(string lobbyID, LobbyData newData, LobbyUpdateReason reason);
+        public delegate void LobbyUpdateHandler(string lobbyID, LobbyData newData, LobbyUpdateReason reason); 
         public event LobbyUpdateHandler LobbyUpdatedEvent;
         public void DoNotUse_InvokeLobbyUpdatedEvent(string lobbyID, LobbyData newData, LobbyUpdateReason reason) => LobbyUpdatedEvent?.Invoke(lobbyID, newData, reason);
 
@@ -106,6 +96,8 @@ namespace EMullen.Networking {
 
             InstanceFinder.ClientManager.OnRemoteConnectionState += ClientManager_OnClientRemoteConnectionState;
             InstanceFinder.ClientManager.OnClientConnectionState += ClientManager_OnClientConnectionState;
+
+            SubscribeToNetworkEvents();
         }
 
         private void OnDisable() 
@@ -115,8 +107,12 @@ namespace EMullen.Networking {
             LobbyMessageEvent -= LobbyCommunicator_LobbyMessageEvent;
             LobbyUpdatedEvent -= LobbyCommunicator_LobbyUpdatedEvent;
 
-            InstanceFinder.ClientManager.OnRemoteConnectionState -= ClientManager_OnClientRemoteConnectionState;
-            InstanceFinder.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState;
+            if(InstanceFinder.ClientManager != null) {
+                InstanceFinder.ClientManager.OnRemoteConnectionState -= ClientManager_OnClientRemoteConnectionState;
+                InstanceFinder.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState;
+            }
+
+            UnsubscribeFromNetworkEvents();
         }
 
 #region Start/Stop communication
@@ -131,7 +127,7 @@ namespace EMullen.Networking {
             LobbyData = null;
 
             // Transport configurement and server starting
-            ConfigureNetwork.Invoke();
+            NetworkController.Instance.StartNetwork();
         }
 
         public void StartCommunicationDelayed(bool retryUntilConnected = true, float delay = 0.1f) => StartCoroutine(StartCommunicationDelayedCoroutine(retryUntilConnected, delay));
@@ -232,6 +228,39 @@ namespace EMullen.Networking {
                 StartCommunicationDelayed(retryUntilConnected);
             } else if(args.ConnectionState == LocalConnectionState.Started) {
                 retryUntilConnected = false;
+            }
+        }
+#endregion
+
+#region NetSceneController management
+        private NetworkManager networkManager;
+
+        private void SubscribeToNetworkEvents() 
+        {
+            if(networkManager != null)
+                return;
+
+            networkManager = InstanceFinder.NetworkManager;
+            networkManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
+
+            BLog.Log("Subscribed to network events.", logSettings, 1);
+        }
+
+        private void UnsubscribeFromNetworkEvents() 
+        {
+            if(networkManager == null)
+                return;
+
+            networkManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
+            networkManager = null;
+        }
+
+        private void ServerManager_OnServerConnectionState(ServerConnectionStateArgs args)
+        {
+            if(args.ConnectionState == LocalConnectionState.Started) {
+                BLog.Highlight("Server started, instantiating lobby manager");
+                GameObject instantiated = Instantiate(lobbyManagerPrefab);
+                InstanceFinder.ServerManager.Spawn(instantiated.GetComponent<NetworkObject>());
             }
         }
 #endregion
