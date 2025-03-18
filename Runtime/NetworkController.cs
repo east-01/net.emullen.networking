@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using EMullen.Core;
 using EMullen.PlayerMgmt;
 using FishNet;
 using FishNet.Connection;
@@ -64,8 +65,9 @@ namespace EMullen.Networking {
         /// The least-restrictive of connection statuses, returns true if the server's status is
         ///   anything but LocalConnectionState.Stopped
         /// </summary>
-        public bool IsServerActive => ServerConnectionState != LocalConnectionState.Stopped;
-        /// <summary>
+        // public bool IsServerActive => (ServerConnectionState & LocalConnectionState.Stopped) != LocalConnectionState.Stopped;
+        public bool IsServerActive => ServerConnectionState != 0;
+        // / <summary>
         /// Checks if the servers's status is LocalConnectionState.Started
         /// </summary>
         public bool IsServerStarted => ServerConnectionState == LocalConnectionState.Started;
@@ -74,7 +76,7 @@ namespace EMullen.Networking {
         /// The least-restrictive of connection statuses, returns true if the client's status is
         ///   anything but LocalConnectionState.Stopped
         /// </summary>
-        public bool IsClientActive => ClientConnectionState != LocalConnectionState.Stopped;
+        public bool IsClientActive => ClientConnectionState != 0;
         /// <summary>
         /// Checks if the client's status is LocalConnectionState.Started
         /// </summary>
@@ -181,6 +183,19 @@ namespace EMullen.Networking {
             if(message != null)
                 Debug.Log("Stop message: " + message);
         }
+
+        public bool CanStartNetwork() => !IsServerActive && !IsClientActive;
+
+        public bool IsNetworkRunning() 
+        {
+            if(networkConfig.isServer && !IsServerStarted)
+                return false;
+
+            if(networkConfig.isClient && !IsClientConnected)
+                return false;
+
+            return true;
+        }
 #endregion
 
 #region Events
@@ -194,8 +209,7 @@ namespace EMullen.Networking {
                 } else {
                     serverStatusText.gameObject.SetActive(false);
                 }
-            } else
-                Debug.LogWarning("No server status text to change ");
+            }
         }
 
         private void ClientManager_OnClientConnectionState(ClientConnectionStateArgs args)
@@ -208,8 +222,7 @@ namespace EMullen.Networking {
                 } else {
                     clientStatusText.gameObject.SetActive(false);
                 }
-            } else 
-                Debug.LogWarning("No server status text to change ");
+            }
         }
 #endregion
 
