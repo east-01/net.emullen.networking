@@ -34,8 +34,8 @@ namespace EMullen.Networking {
         }
 
         [SerializeField]
-        private List<NetworkConfiguration> networkConfigList;
-        
+        private List<NetworkConfiguration> networkConfigList;        
+
         [Space]
 
         [SerializeField] 
@@ -46,6 +46,14 @@ namespace EMullen.Networking {
         public LocalConnectionState ClientConnectionState => clientConnectionState;
 
         [Space]
+        /// <summary>
+        /// The MenuController that will be shown when prompting the user to configure the network,
+        ///   this MenuController MUST provide a way for the user to set 
+        //    NetworkController#NetworkConfig.
+        /// </summary>
+        [SerializeField]
+        private MenuController.MenuController netConfigMenuController;
+        public MenuController.MenuController NetworkConfiguratorMenuController => netConfigMenuController;
         [SerializeField]
         private KeyCode debugCanvasKeyCode = KeyCode.F3;
         [SerializeField]
@@ -184,10 +192,13 @@ namespace EMullen.Networking {
                 Debug.Log("Stop message: " + message);
         }
 
-        public bool CanStartNetwork() => !IsServerActive && !IsClientActive;
+        public bool CanStartNetwork() => !IsServerActive && !IsClientActive && networkConfig != null;
 
         public bool IsNetworkRunning() 
         {
+            if(networkConfig == null)
+                return false;
+
             if(networkConfig.isServer && !IsServerStarted)
                 return false;
 

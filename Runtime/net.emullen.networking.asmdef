@@ -6,7 +6,8 @@
         "Unity.TextMeshPro",
         "Core",
         "SceneMgmt",
-        "PlayerMgmt"
+        "PlayerMgmt",
+        "MenuController"
     ],
     "optionalUnityReferences": [],
     "includePlatforms": [],

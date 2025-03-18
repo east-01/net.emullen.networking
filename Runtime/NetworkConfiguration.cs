@@ -3,8 +3,7 @@ using UnityEngine;
 
 namespace EMullen.Networking 
 {
-    [CreateAssetMenu(fileName = "NetworkConfig", menuName = "Networking/Create New Network Config")]
-    public class NetworkConfiguration : ScriptableObject 
+    public class NetworkConfiguration
     {
         /// <summary>
         /// Used by the NetworkController general NetworkConfiguration storage to identify this
@@ -19,5 +18,16 @@ namespace EMullen.Networking
         public IPAddressType ipAddressType;
         public string clientAddress;
         public ushort port;
+
+        public NetworkConfiguration(string tag, bool isServer, bool isClient, string serverBindAddress, IPAddressType iPAddressType, string clientAddress, ushort port) 
+        {
+            this.tag = tag;
+            this.isServer = isServer;
+            this.isClient = isClient;
+            this.serverBindAddress = serverBindAddress;
+            this.ipAddressType = iPAddressType;
+            this.clientAddress = clientAddress;
+            this.port = port;
+        }
     }
 }
