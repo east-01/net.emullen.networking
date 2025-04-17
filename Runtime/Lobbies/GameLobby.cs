@@ -32,7 +32,7 @@ namespace EMullen.Networking.Lobby {
         public LobbyState State { 
             get { return state; }
             set {
-                BLog.Log($"{MessagePrefix}Setting state to {value.GetType()}", LobbyManager.Instance.LogSettingsGameLobby, 1);
+                BLog.Log($"{MessagePrefix}Setting state to {value.GetType()}", "GameLobby", 1);
                 LobbyState prevState = state;
                 state = value;
                 LobbyStateChangedEvent?.Invoke(prevState, state);
@@ -60,15 +60,15 @@ namespace EMullen.Networking.Lobby {
             GLSceneManager = new GameLobbySceneManager(this);
             ID = GenerateLobbyID();
 
-            BLog.Log($"Initialized lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            BLog.Log($"Initialized lobby \"{ID}\"", "GameLobby", 0);
         }
 
         public void Delete() 
         {
-            BLog.Log($"{MessagePrefix}Deleting self...", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            BLog.Log($"{MessagePrefix}Deleting self...", "GameLobby", 0);
         }
 
-        public void Update() 
+        public virtual void Update() 
         {
             if(State != null) {
                 State.Update();
@@ -109,19 +109,19 @@ namespace EMullen.Networking.Lobby {
         public bool Add(string playerUID) 
         {
             if(!PlayerDataRegistry.Instance.Contains(playerUID)) {
-                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby, they dont have PlayerData.", LobbyManager.Instance.LogSettingsGameLobby, 0);
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby, they dont have PlayerData.", "GameLobby", 0);
                 return false;
             }
             PlayerData pd = PlayerDataRegistry.Instance.GetPlayerData(playerUID);
 
             string currentLobbyID = LobbyManager.Instance.GetLobbyID(pd.GetData<NetworkIdentifierData>().GetNetworkConnection());
             if(currentLobbyID != null && currentLobbyID != ID) {
-                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby \"{ID}\" thir lobby id doesn't match!", LobbyManager.Instance.LogSettingsGameLobby, 0);
+                BLog.Log($"{MessagePrefix} Failed to add player {playerUID} to lobby \"{ID}\" thir lobby id doesn't match!", "GameLobby", 0);
                 return false;
             }
 
             players.Add(playerUID);
-            BLog.Log($"{MessagePrefix}Added player {playerUID} to lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            BLog.Log($"{MessagePrefix}Added player {playerUID} to lobby \"{ID}\"", "GameLobby", 0);
             return true;
         }
 
@@ -146,7 +146,7 @@ namespace EMullen.Networking.Lobby {
                 Debug.LogError($"Can't remove player {playerUID} from lobby \"{ID}\", they're not in it.");
                 return;
             }
-            BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+            BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", "GameLobby", 0);
             players.Remove(playerUID);
         }
 
@@ -156,6 +156,12 @@ namespace EMullen.Networking.Lobby {
             toRemove.ForEach(uid => Remove(uid));
         }
 #endregion
+
+        /// <summary>
+        /// Callback for when the GameLobbySceneManager claims a scene.
+        /// </summary>
+        /// <param name="sceneLookupData">The claimed scene's lookup data.</param>
+        public virtual void ClaimedScene(SceneLookupData sceneLookupData) {}
 
         public LobbyData Data { get {
             return new() {

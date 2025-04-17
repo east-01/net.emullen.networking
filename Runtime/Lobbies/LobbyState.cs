@@ -19,7 +19,8 @@ namespace EMullen.Networking.Lobby
         /// <summary>
         /// Check for a condition that means we need to move to a new state.
         /// </summary>
-        /// <returns>The lobby state that we'll be transitioning to.</returns>
+        /// <returns>The lobby state that we'll be transitioning to. Return null if no new state 
+        ///   selected.</returns>
         public abstract LobbyState CheckForStateChange();
 
     }

@@ -53,8 +53,10 @@ namespace EMullen.Networking.Lobby
                     return;
                 }
 
-                LobbyManager.Instance.ClaimScene(Lobby.ID, lookupData);
-                BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", LobbyManager.Instance.LogSettingsGameLobby, 0);
+                if(LobbyManager.Instance.ClaimScene(Lobby.ID, lookupData)) {
+                    BLog.Log($"{Lobby.MessagePrefix}Claimed scene \"{lookupData}\"", "GameLobby", 0);
+                    Lobby.ClaimedScene(lookupData);
+                }
             }
         }
 
