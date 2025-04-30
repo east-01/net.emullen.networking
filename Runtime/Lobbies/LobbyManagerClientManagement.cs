@@ -5,6 +5,7 @@ using EMullen.Core;
 using EMullen.PlayerMgmt;
 using FishNet;
 using FishNet.Connection;
+using FishNet.Transporting;
 using UnityEngine;
 
 namespace EMullen.Networking.Lobby 
@@ -15,27 +16,56 @@ namespace EMullen.Networking.Lobby
     /// </summary>
     public partial class LobbyManager : MonoBehaviour 
     {
+
         /// <summary>
-        /// Synchronized between client and server, has a NetworkConnection and the string lobbyID
-        ///   that the client is connected to.
+        /// A dictionary containing joining NetworkConnections and the time they joined.
+        /// </summary>
+        private Dictionary<NetworkConnection, float> joiningPlayers = new();
+        /// <summary>
+        /// Has a NetworkConnection and the string lobbyID that the client is connected to.
         /// </summary>
         private Dictionary<NetworkConnection, string> connectionLobbyPair = new();
+        /// <summary>
+        /// Stores the list of player uids belonging to a specific connection.
+        /// </summary>
+        private Dictionary<NetworkConnection, List<string>> connectionsUIDs = new();
+
+        private void ClientManagementAwake() 
+        {
+            InstanceFinder.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState;
+        }
+
+        private void ClientManagementOnDestroy() 
+        {
+            InstanceFinder.ServerManager.OnRemoteConnectionState -= ServerManager_OnRemoteConnectionState;
+        }
 
         private void ClientManagementUpdate() 
         {
             if(!InstanceFinder.IsServerStarted)
                 return;
 
-            List<NetworkConnection> clientsWithoutLobbies = InstanceFinder.ClientManager.Clients.Values.ToList().Except(connectionLobbyPair.Keys).ToList();
-            foreach(NetworkConnection clientWithoutLobby in clientsWithoutLobbies) {                
+            // Get the clients that are connected but not in lobby and put them in one.
+            List<NetworkConnection> joinedPlayers = new(); // The list of players added this frame.
+            foreach(NetworkConnection clientWithoutLobby in joiningPlayers.Keys) {   
+                float timeJoined = joiningPlayers[clientWithoutLobby];
+                if(Time.time - timeJoined > 10f) {
+                    Debug.LogWarning($"Client {clientWithoutLobby.ClientId} has been joining for a long time, should do something abt it.");
+                }             
+
                 List<string> uids = GetPlayerUIDSFromConnection(clientWithoutLobby);
                 if(uids.Count == 0) {
                     continue;
                 }
+
                 AddToLobby(clientWithoutLobby, uids);
+                connectionsUIDs.Add(clientWithoutLobby, uids);
+                joinedPlayers.Add(clientWithoutLobby);
             }
 
-
+            foreach(NetworkConnection joinedConnection in joinedPlayers) {
+                joiningPlayers.Remove(joinedConnection);
+            }
         }
 
         /// <summary>
@@ -86,17 +116,23 @@ namespace EMullen.Networking.Lobby
                 throw new InvalidOperationException("Can't remove client from lobby, server isn't started.");
             if(!connectionLobbyPair.ContainsKey(client))
                 throw new InvalidOperationException($"Can't remove client \"{client}\" from lobby, they're not in one.");
+            if(!connectionsUIDs.ContainsKey(client))
+                throw new InvalidOperationException($"Can't remove client \"{client}\" from lobby, they don't have any uids assigned to them.");
 
             GameLobby lobbyToLeave = GetLobby(client);
-            lobbyToLeave.RemoveClientsPlayers(client, out bool yieldsEmptyLobby);
+
+            List<string> uids = connectionsUIDs[client];
+            foreach(string uid in uids) {
+                lobbyToLeave.Remove(uid);
+            }
 
             connectionLobbyPair.Remove(client);
             
-            BLog.Log($"Removed client {client} from lobby \"{lobbyToLeave.ID}\" for reason \"{reason}\"", "Lobby", 0);
+            BLog.Log($"Removed client {client.ClientId} from lobby \"{lobbyToLeave.ID}\" for reason \"{reason}\"", "Lobby", 0);
 
             UpdateLobby(lobbyToLeave.ID, LobbyUpdateReason.PLAYER_LEAVE);
 
-            if(yieldsEmptyLobby)
+            if(lobbyToLeave.PlayerCount == 0)
                 DeleteLobby(lobbyToLeave.ID);
         }
     
@@ -114,8 +150,8 @@ namespace EMullen.Networking.Lobby
             foreach(string id in lobbies.Keys) {
                 GameLobby lobby = lobbies[id];
                 // TODO: Add other determining factors like game state
-                bool joinable = lobby.OpenSlots > 0/* && lobby.State == LobbyState.WAITING_FOR_PLAYERS*/;
-                BLog.Log($"  Found \"{id}\" with {lobby.OpenSlots} open slots in state {lobby.State}. Joinable: {joinable}", "Lobby", 2);
+                bool joinable = lobby.Joinable();
+                BLog.Log($"  Found \"{id}\" in state {lobby.State}. Joinable: {joinable}", "Lobby", 2);
                 if(joinable) {
                     lobbyToJoin = lobby;
                     break;
@@ -144,6 +180,24 @@ namespace EMullen.Networking.Lobby
             }
             return uids;
         }
+
+#region Events
+        public void ServerManager_OnRemoteConnectionState(NetworkConnection connection, RemoteConnectionStateArgs args) 
+        {
+            switch(args.ConnectionState) {
+                case RemoteConnectionState.Started:
+                    if(joiningPlayers.ContainsKey(connection))
+                        throw new InvalidOperationException("Cannot handle join operation, the NetworkConnection is already joining!");
+
+                    joiningPlayers.Add(connection, Time.time);
+                    break;
+                case RemoteConnectionState.Stopped:
+                    RemoveFromLobby(connection, "Client disconnected.");
+                    break;
+            }
+        }
+        
+#endregion
 
     }
 }

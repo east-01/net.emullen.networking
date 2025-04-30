@@ -83,20 +83,22 @@ namespace EMullen.Networking.Lobby {
             Instance = this;
             DontDestroyOnLoad(this);
 
+            ClientManagementAwake();
             ClientAwake();
         }
 
         private void OnDestroy()
         {
+            ClientManagementOnDestroy();
             ClientOnDestroy();   
         }
 
         private void Update()  
         {
-            LobbyObjects.ForEach(lobby => lobby.Update());
-
             ClientManagementUpdate();
             ClientUpdate();
+        
+            LobbyObjects.ForEach(lobby => lobby.Update());
         }
 
         /// <summary>

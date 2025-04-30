@@ -34,11 +34,13 @@ namespace EMullen.Networking.Lobby
             Lobby = lobby;
 
             InstanceFinder.SceneManager.OnLoadEnd += FishNetSceneManager_OnLoadEnd;
+            InstanceFinder.SceneManager.OnUnloadEnd += FishNetSceneManager_OnUnloadEnd;
         }
 
         ~GameLobbySceneManager() 
         {
             InstanceFinder.SceneManager.OnLoadEnd -= FishNetSceneManager_OnLoadEnd;
+            InstanceFinder.SceneManager.OnUnloadEnd -= FishNetSceneManager_OnUnloadEnd;
         }
 
         private void FishNetSceneManager_OnLoadEnd(SceneLoadEndEventArgs args)
@@ -60,6 +62,21 @@ namespace EMullen.Networking.Lobby
             }
         }
 
+        private void FishNetSceneManager_OnUnloadEnd(SceneUnloadEndEventArgs args) 
+        {
+            List<UnloadedScene> unloadedScenes = args.UnloadedScenesV2;
+
+            foreach(UnloadedScene scene in unloadedScenes) {
+                SceneLookupData lookupData = scene.GetSceneLookupData();
+
+                if(LobbyManager.Instance.GetOwner(lookupData) != Lobby.ID)
+                    continue;
+
+                LobbyManager.Instance.UnclaimScene(lookupData);
+                Lobby.UnclaimedScene(lookupData);
+            }
+        }
+
         /// <summary>
         /// Unload all of the scenes that this GameLobby owns.
         /// </summary>
@@ -73,14 +90,16 @@ namespace EMullen.Networking.Lobby
         ///   player will load it as a local scene for themselves, disconnected from any server's
         ///   scenes.
         /// </summary>
-        public void LoadPlayersScene(SceneLookupData lookupData)
+        public void LoadPlayersScene(SceneLookupData lookupData, bool tellHost = false)
         {
-            SceneSyncBroadcast broadcast = new(new() { lookupData });
-
             foreach(string playerUID in Lobby.Players) {
                 // Retrieve the network connection related to the players uid
                 NetworkConnection playerConn = PlayerDataRegistry.Instance.GetPlayerData(playerUID).GetData<NetworkIdentifierData>().GetNetworkConnection();
-                InstanceFinder.ServerManager.Broadcast(playerConn, broadcast);
+
+                if(!tellHost && InstanceFinder.IsHostStarted && InstanceFinder.ClientManager.Connection == playerConn)
+                    continue;
+
+                SceneController.Instance.LoadScenesOnConnection(playerConn, new() { lookupData });
             }
         }
     }

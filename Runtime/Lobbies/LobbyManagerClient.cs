@@ -21,26 +21,30 @@ namespace EMullen.Networking.Lobby
         private void ClientAwake() 
         {
             InstanceFinder.ClientManager.RegisterBroadcast<LobbyUpdateBroadcast>(OnLobbyUpdate);
+            LobbyUpdatedEvent += LobbyManager_LobbyUpdateEvent;
         }
 
         private void ClientOnDestroy() 
         {
             InstanceFinder.ClientManager.UnregisterBroadcast<LobbyUpdateBroadcast>(OnLobbyUpdate);            
+            LobbyUpdatedEvent -= LobbyManager_LobbyUpdateEvent;
         }
 
         private void ClientUpdate() 
         {
-            if(InLobby && !InstanceFinder.IsClientStarted) {
-                Debug.LogWarning("Handling sudden disconnect from lobby.");
-                SceneManager.LoadScene(defaultSceneName, LoadSceneMode.Single);
-                LobbyID = null;
-                LobbyData = null;
-            }
+            // if(InLobby && !InstanceFinder.IsClientStarted) {
+            //     Debug.LogWarning("Handling sudden disconnect from lobby.");
+            //     SceneManager.LoadScene(defaultSceneName, LoadSceneMode.Single);
+            //     LobbyID = null;
+            //     LobbyData = null;
+            // }
         }
 
-        private void OnLobbyUpdate(LobbyUpdateBroadcast broadcast, Channel channel) 
+        private void OnLobbyUpdate(LobbyUpdateBroadcast broadcast, Channel channel) => LobbyUpdatedEvent?.Invoke(broadcast.lobbyID, broadcast.data, broadcast.reason);
+
+        private void LobbyManager_LobbyUpdateEvent(string lobbyID, LobbyData newData, LobbyUpdateReason reason) 
         {
-            switch(broadcast.reason) {
+            switch(reason) {
                 case LobbyUpdateReason.PLAYER_JOIN:
 
                     if(LobbyID != null) {
@@ -48,16 +52,16 @@ namespace EMullen.Networking.Lobby
                         return;
                     }
 
-                    LobbyID = broadcast.lobbyID;
-                    LobbyData = broadcast.data;
-                    BLog.Log($"Joined lobby \"{broadcast.lobbyID}\"", "Lobby", 0);
+                    LobbyID = lobbyID;
+                    LobbyData = newData;
+                    BLog.Log($"Joined lobby \"{lobbyID}\"", "Lobby", 0);
 
                     break;
 
                 case LobbyUpdateReason.PLAYER_LEAVE:
 
-                    if(LobbyID != broadcast.lobbyID) {
-                        Debug.LogError($"Recieved LobbyLeftEvent when lobbyID's do not match. Current: \"{LobbyID}\" Incoming: \"{broadcast.lobbyID}\"");
+                    if(LobbyID != lobbyID) {
+                        Debug.LogError($"Recieved LobbyLeftEvent when lobbyID's do not match. Current: \"{LobbyID}\" Incoming: \"{lobbyID}\"");
                         return;
                     }
 
@@ -68,13 +72,13 @@ namespace EMullen.Networking.Lobby
 
                 default:
 
-                    if(LobbyID != broadcast.lobbyID) {
-                        Debug.LogError($"Recieved LobbyUpdatedEvent when lobbyID's do not match. Current: \"{LobbyID}\" Incoming: \"{broadcast.lobbyID}\"");
+                    if(LobbyID != lobbyID) {
+                        Debug.LogError($"Recieved LobbyUpdatedEvent when lobbyID's do not match. Current: \"{LobbyID}\" Incoming: \"{lobbyID}\"");
                         return;
                     }
 
-                    LobbyData = broadcast.data;
-
+                    LobbyData = newData;
+                    
                     break;
             }
         }

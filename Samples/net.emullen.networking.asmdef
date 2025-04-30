@@ -1,0 +1,24 @@
+{
+    "name": "Networking.Samples",
+    "rootNamespace": "EMullen.Networking.Samples",
+    "references": [
+        "FishNet.Runtime",
+        "Unity.TextMeshPro",
+        "Networking",
+        "Core",
+        "Bootstrapper",
+        "SceneMgmt",
+        "PlayerMgmt",
+        "MenuController"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

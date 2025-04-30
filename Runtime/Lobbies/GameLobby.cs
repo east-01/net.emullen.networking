@@ -4,11 +4,8 @@ using System.Linq;
 using FishNet;
 using FishNet.Connection;
 using FishNet.Managing.Scened;
-using FishNet.Object.Synchronizing;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using EMullen.Core;
-using EMullen.SceneMgmt;
 using EMullen.PlayerMgmt;
 using System.Collections.ObjectModel;
 
@@ -20,7 +17,6 @@ namespace EMullen.Networking.Lobby {
     public class GameLobby 
     {
 
-        public static int PlayerLimit = 8;
         public static readonly List<string> LobbyNames = new() { "Champ", "Craig", "Jeremiah", "Gabrial", "Sun", "Time", "Anchor", "Age" };
 
         public GameLobbySceneManager GLSceneManager { get; private set; }
@@ -43,9 +39,7 @@ namespace EMullen.Networking.Lobby {
 
         private readonly List<string> players = new();
         public ReadOnlyCollection<string> Players => players.AsReadOnly(); 
-
         public int PlayerCount => players.Count;
-        public int OpenSlots => PlayerLimit - players.Count;
 
         public List<PlayerData> PlayerDatas => players.Select(uid => PlayerDataRegistry.Instance.GetPlayerData(uid)).ToList();
         public List<NetworkConnection> Connections => PlayerDatas.Select(pd => pd.GetData<NetworkIdentifierData>().GetNetworkConnection()).Distinct().ToList();
@@ -99,6 +93,12 @@ namespace EMullen.Networking.Lobby {
 
 #region Player Management
         /// <summary>
+        /// Get if the lobby is joinable, can be overridden by child classes of GameLobby;
+        /// </summary>
+        /// <returns>Boolean joinable statis.</returns>
+        public virtual bool Joinable() => true;
+
+        /// <summary>
         /// Add a player to this GameLobby, the players' lobby ID and other elements are NOT changed
         ///   by this method, so it is important that all of that is in order before this method is
         ///   called. The lobbyID is changed in LobbyManager#AddToLobby.
@@ -149,12 +149,6 @@ namespace EMullen.Networking.Lobby {
             BLog.Log($"{MessagePrefix}Removed player {playerUID} from lobby \"{ID}\"", "GameLobby", 0);
             players.Remove(playerUID);
         }
-
-        public void RemoveClientsPlayers(NetworkConnection client, out bool yieldsEmptyLobby) {
-            List<string> toRemove = PlayerDataRegistry.Instance.GetAllData().ToList().Where(data => data.HasData<NetworkIdentifierData>() && data.GetData<NetworkIdentifierData>().clientID == client.ClientId).Select(pd => pd.GetUID()).ToList();            
-            yieldsEmptyLobby = PlayerCount-toRemove.Count == 0;
-            toRemove.ForEach(uid => Remove(uid));
-        }
 #endregion
 
         /// <summary>
@@ -162,6 +156,11 @@ namespace EMullen.Networking.Lobby {
         /// </summary>
         /// <param name="sceneLookupData">The claimed scene's lookup data.</param>
         public virtual void ClaimedScene(SceneLookupData sceneLookupData) {}
+        /// <summary>
+        /// Callback for when the GameLobbySceneManager unclaims a scene.
+        /// </summary>
+        /// <param name="sceneLookupData">The unclaimed scene's lookup data.</param>
+        public virtual void UnclaimedScene(SceneLookupData sceneLookupData) {}
 
         public LobbyData Data { get {
             return new() {
