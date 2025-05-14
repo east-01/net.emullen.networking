@@ -61,7 +61,7 @@ namespace EMullen.Networking
                 "user_generated",
                 isServerToggle.isOn,
                 isClientToggle.isOn,
-                "",
+                isServerToggle.isOn ? "0.0.0.0" : "",
                 IPAddressType.IPv4,
                 address.text,
                 port
