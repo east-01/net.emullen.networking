@@ -2,7 +2,13 @@ using System;
 using EMullen.Core;
 using FishNet.Managing;
 using FishNet.Transporting;
+#if UNITY_2022_3_OR_NEWER
+using Unity.Plastic.Newtonsoft.Json;
+using Unity.Plastic.Newtonsoft.Json.Linq;
+#else
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+#endif
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
